@@ -1,5 +1,10 @@
 # Docker Registry
 
+**Escape Docker Hub rate limits — self-hosted registry + pull-through cache on your own VPS.**
+
+[![License](https://img.shields.io/badge/license-BSD-blue.svg)](LICENSE.md)
+[![Release](https://img.shields.io/github/v/release/rokorolov/docker-registry-stack)](https://github.com/rokorolov/docker-registry-stack/releases/latest)
+
 Self-hosted private Docker registry with a Docker Hub pull-through cache, Nginx reverse proxy, TLS via Let's Encrypt, and Ansible provisioning.
 
 ## Contents
@@ -68,7 +73,7 @@ GitHub Container Registry (GHCR) is the most common alternative for teams alread
 | You are already paying for a VPS | The registry runs on infrastructure you pay for regardless — marginal cost is zero. |
 | High pull volume in CI | GHCR charges for data out. Pulling a 1 GB image across 50 CI runs/day is ~1.5 TB/month. On your own VPS that is $0. |
 | Non-GitHub CI (GitLab, Jenkins, Buildkite) | No `GITHUB_TOKEN` shortcut — GHCR credential management becomes manual. |
-| Data sovereignty or compliance requirements | Images never leave your server or your jurisdiction. |
+| Data locality requirements | Images stay on your server, in your jurisdiction. Note: auth is single-tier `htpasswd` — no per-user RBAC or audit logging. |
 
 **Choose GHCR when:**
 
@@ -438,6 +443,12 @@ cd provisioning && ./provision make gc
 ```
 
 Runs GC on both the private registry and the cache registry without stopping the containers. Pause any CI pipelines that push images before running to avoid a race condition.
+
+### Back up registry data
+
+Only the private registry volume needs backing up — the cache re-populates automatically from Docker Hub on the next pull.
+
+See [`docs/backup-plan.md`](docs/backup-plan.md) for the full implementation plan, including a ready-to-use backup script, an Ansible role for provisioning secrets and a cron job, and a step-by-step restore procedure.
 
 ### Add or rotate registry credentials
 
