@@ -3,7 +3,7 @@
 **Escape Docker Hub rate limits — self-hosted registry + pull-through cache on your own VPS.**
 
 [![License](https://img.shields.io/badge/license-BSD-blue.svg)](LICENSE.md)
-[![Release](https://img.shields.io/github/v/release/rokorolov/docker-registry-stack)](https://github.com/rokorolov/docker-registry-stack/releases/latest)
+[![Release](https://img.shields.io/github/v/tag/rokorolov/docker-registry-stack)](https://github.com/rokorolov/docker-registry-stack/releases/latest)
 
 Self-hosted private Docker registry with a Docker Hub pull-through cache, Nginx reverse proxy, TLS via Let's Encrypt, and Ansible provisioning.
 
