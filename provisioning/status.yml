@@ -1,0 +1,82 @@
+---
+-   name: Registry stack status
+    hosts: all
+    remote_user: root
+    gather_facts: false
+    tasks:
+        -   name: Docker container status
+            ansible.builtin.command: !unsafe docker ps --format "table {{.Names}}\t{{.Status}}\t{{.Image}}"
+            changed_when: false
+            register: docker_ps
+
+        -   name: Disk usage
+            ansible.builtin.command: df -h /
+            changed_when: false
+            register: disk_df
+
+        -   name: UFW rules
+            ansible.builtin.command: ufw status
+            changed_when: false
+            register: ufw_out
+
+        -   name: Days until registry certificate expires
+            ansible.builtin.shell: |
+                expiry=$(openssl s_client -connect 127.0.0.1:443 \
+                    -servername {{ registry_domain }} </dev/null 2>/dev/null \
+                    | openssl x509 -noout -enddate 2>/dev/null | cut -d= -f2)
+                [ -z "$expiry" ] && echo "no certificate" && exit 0
+                echo $(( ( $(date -d "$expiry" +%s) - $(date +%s) ) / 86400 )) days remaining
+            changed_when: false
+            register: registry_cert
+
+        -   name: Days until cache registry certificate expires
+            ansible.builtin.shell: |
+                expiry=$(openssl s_client -connect 127.0.0.1:443 \
+                    -servername {{ cache_registry_domain }} </dev/null 2>/dev/null \
+                    | openssl x509 -noout -enddate 2>/dev/null | cut -d= -f2)
+                [ -z "$expiry" ] && echo "no certificate" && exit 0
+                echo $(( ( $(date -d "$expiry" +%s) - $(date +%s) ) / 86400 )) days remaining
+            changed_when: false
+            register: cache_cert
+
+        -   name: Check registry API reachability
+            ansible.builtin.uri:
+                url: "https://{{ registry_domain }}/v2/"
+                status_code: [200, 401]
+                validate_certs: true
+            register: registry_api
+            delegate_to: localhost
+            failed_when: false
+
+        -   name: Check cache registry API reachability
+            ansible.builtin.uri:
+                url: "https://{{ cache_registry_domain }}/v2/"
+                status_code: [200, 401]
+                validate_certs: true
+            register: cache_api
+            delegate_to: localhost
+            failed_when: false
+
+        -   name: Containers
+            ansible.builtin.debug:
+                msg: "{{ docker_ps.stdout_lines }}"
+
+        -   name: Disk
+            ansible.builtin.debug:
+                msg: "{{ disk_df.stdout_lines }}"
+
+        -   name: Firewall
+            ansible.builtin.debug:
+                msg: "{{ ufw_out.stdout_lines }}"
+
+        -   name: TLS certificates
+            ansible.builtin.debug:
+                msg:
+                    - "{{ registry_domain }}: {{ registry_cert.stdout | trim }}"
+                    - "{{ cache_registry_domain }}: {{ cache_cert.stdout | trim }}"
+
+        -   name: API health (from controller)
+            ansible.builtin.debug:
+                msg:
+                    - "{{ registry_domain }}/v2/ → {{ 'unreachable' if registry_api.status | default(-1) == -1 else 'HTTP ' ~ registry_api.status }}"
+                    - "{{ cache_registry_domain }}/v2/ → {{ 'unreachable' if cache_api.status | default(-1) == -1 else 'HTTP ' ~ cache_api.status }}"

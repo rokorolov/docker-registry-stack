@@ -1,0 +1,27 @@
+---
+-   name: Show registry logs
+    hosts: all
+    remote_user: root
+    gather_facts: false
+    vars:
+        registry_container: registry-registry-1
+        cache_container: registry-cache-registry-1
+        tail_lines: "{{ lines | default(200) }}"
+    tasks:
+        -   name: Get registry logs
+            ansible.builtin.shell: "docker logs {{ registry_container }} --tail {{ tail_lines }} 2>&1"
+            changed_when: false
+            register: registry_logs
+
+        -   name: Get cache registry logs
+            ansible.builtin.shell: "docker logs {{ cache_container }} --tail {{ tail_lines }} 2>&1"
+            changed_when: false
+            register: cache_logs
+
+        -   name: "{{ registry_container }} (last {{ tail_lines }} lines)"
+            ansible.builtin.debug:
+                msg: "{{ registry_logs.stdout_lines }}"
+
+        -   name: "{{ cache_container }} (last {{ tail_lines }} lines)"
+            ansible.builtin.debug:
+                msg: "{{ cache_logs.stdout_lines }}"

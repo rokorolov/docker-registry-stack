@@ -1,0 +1,2 @@
+---
+registry_nginx_config_path: /etc/docker-registry/nginx

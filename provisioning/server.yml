@@ -1,0 +1,9 @@
+---
+-   name: Set Up
+    hosts: all
+    remote_user: root
+    roles:
+        - ufw
+        - docker
+        - create-deploy-user
+        - docker-registry

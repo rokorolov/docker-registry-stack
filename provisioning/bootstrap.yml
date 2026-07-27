@@ -1,0 +1,19 @@
+---
+-   name: Bootstrap root SSH key access
+    hosts: all
+    remote_user: root
+    tasks:
+        -   name: Ensure root .ssh directory exists
+            ansible.builtin.file:
+                path: /root/.ssh
+                state: directory
+                mode: '0700'
+
+        -   name: Add SSH public key to root authorized_keys
+            ansible.posix.authorized_key:
+                user: root
+                key: "{{ lookup('file', item) }}"
+            with_first_found:
+                - "~/.ssh/id_ed25519.pub"
+                - "~/.ssh/id_ecdsa.pub"
+                - "~/.ssh/id_rsa.pub"

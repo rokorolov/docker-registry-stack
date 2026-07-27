@@ -1,0 +1,32 @@
+services:
+    nginx:
+        image: nginx:1.30.3-alpine3.23
+        ports:
+            - "5000:5000"
+            - "5001:5001"
+        volumes:
+            - ./docker/development/nginx/conf.d:/etc/nginx/conf.d
+            - ./docker/development/nginx/auth/htpasswd:/etc/nginx/auth/htpasswd
+        depends_on:
+            - registry
+            - cache-registry
+
+    registry:
+        image: registry:3.1.1
+        volumes:
+            - registry:/var/lib/registry
+
+    cache-registry:
+        image: registry:3.1.1
+        restart: always
+        environment:
+            REGISTRY_LOG_LEVEL: info
+            REGISTRY_PROXY_REMOTEURL: https://registry-1.docker.io
+            REGISTRY_PROXY_TTL: 168h
+            REGISTRY_STORAGE_DELETE_ENABLED: "true"
+        volumes:
+            - cache-registry:/var/lib/registry
+
+volumes:
+    registry:
+    cache-registry:

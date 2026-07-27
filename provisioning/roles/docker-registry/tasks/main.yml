@@ -1,0 +1,10 @@
+---
+-   name: Validate required variables
+    ansible.builtin.assert:
+        that:
+            - registry_domain is defined and registry_domain | length > 0
+            - cache_registry_domain is defined and cache_registry_domain | length > 0
+        fail_msg: >
+            registry_domain and cache_registry_domain must be set in inventory (e.g. hosts.yml all.vars)
+
+-   import_tasks: deploy_nginx_config.yml

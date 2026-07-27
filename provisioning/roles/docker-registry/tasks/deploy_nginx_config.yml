@@ -1,0 +1,27 @@
+---
+-   name: Create nginx config directory
+    become: true
+    ansible.builtin.file:
+        path: "{{ registry_nginx_config_path }}"
+        state: directory
+        owner: root
+        group: root
+        mode: '0755'
+
+-   name: Deploy registry nginx config
+    become: true
+    ansible.builtin.template:
+        src: registry.conf.j2
+        dest: "{{ registry_nginx_config_path }}/registry.conf"
+        owner: root
+        group: root
+        mode: '0644'
+
+-   name: Deploy cache-registry nginx config
+    become: true
+    ansible.builtin.template:
+        src: cache-registry.conf.j2
+        dest: "{{ registry_nginx_config_path }}/cache-registry.conf"
+        owner: root
+        group: root
+        mode: '0644'

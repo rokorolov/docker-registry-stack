@@ -1,0 +1,11 @@
+all:
+    vars:
+        registry_domain: registry.example.com
+        cache_registry_domain: cache-registry.example.com
+        certbot_admin_email: admin@example.com
+    hosts:
+        server:
+            ansible_connection: ssh
+            ansible_user: root
+            ansible_host: 0.0.0.0
+            ansible_port: 22

@@ -1,0 +1,86 @@
+services:
+    nginx:
+        image: nginx:1.30.3-alpine3.23
+        restart: always
+        ports:
+            - "80:80"
+            - "443:443"
+        volumes:
+            - /etc/letsencrypt:/etc/letsencrypt:ro
+            - /var/www/html:/var/www/html:ro
+            - /etc/docker-registry/nginx:/etc/nginx/conf.d:ro
+            - ./htpasswd:/etc/nginx/auth/htpasswd:ro
+        healthcheck:
+            test: ["CMD", "curl", "-f", "http://localhost/"]
+            interval: 30s
+            timeout: 5s
+            retries: 3
+            start_period: 10s
+        depends_on:
+            registry:
+                condition: service_healthy
+            cache-registry:
+                condition: service_healthy
+        networks:
+            - registry-net
+        logging:
+            driver: json-file
+            options:
+                max-size: "10m"
+                max-file: "3"
+
+    registry:
+        image: registry:3.1.1
+        restart: always
+        environment:
+            REGISTRY_LOG_LEVEL: info
+        volumes:
+            - registry:/var/lib/registry
+        healthcheck:
+            test: ["CMD-SHELL", "wget -q --spider http://localhost:5000/v2/ || exit 1"]
+            interval: 30s
+            timeout: 5s
+            retries: 3
+            start_period: 10s
+        networks:
+            - registry-net
+        logging:
+            driver: json-file
+            options:
+                max-size: "10m"
+                max-file: "3"
+
+    cache-registry:
+        image: registry:3.1.1
+        restart: always
+        environment:
+            REGISTRY_LOG_LEVEL: info
+            REGISTRY_PROXY_REMOTEURL: https://registry-1.docker.io
+            REGISTRY_PROXY_TTL: 168h
+            REGISTRY_STORAGE_DELETE_ENABLED: "true"
+            # Optional: set in ~/registry/.env on the server to bypass Docker Hub rate limits.
+            REGISTRY_PROXY_USERNAME: ${REGISTRY_PROXY_USERNAME:-}
+            REGISTRY_PROXY_PASSWORD: ${REGISTRY_PROXY_PASSWORD:-}
+        volumes:
+            - cache-registry:/var/lib/registry
+        healthcheck:
+            test: ["CMD-SHELL", "wget -q --spider http://localhost:5000/v2/ || exit 1"]
+            interval: 30s
+            timeout: 5s
+            retries: 3
+            start_period: 10s
+        networks:
+            - registry-net
+        logging:
+            driver: json-file
+            options:
+                max-size: "10m"
+                max-file: "3"
+
+volumes:
+    registry:
+    cache-registry:
+
+networks:
+    registry-net:
+        driver: bridge
