@@ -142,7 +142,7 @@ Ansible, `apache2-utils`, and all other provisioning dependencies are bundled in
 
 > All commands in this section run from the `provisioning/` directory - `cd provisioning` once before starting.
 >
-> Steps **2** (Bootstrap SSH key) and **7** (Authorize deploy user) are optional - skip them if your VPS provider installed your SSH key at server creation time.
+> Steps **2** (Install your SSH key) and **7** (Authorize deploy user) are optional - skip them if your VPS provider installed your SSH key at server creation time.
 
 ### 0. Build the provisioning toolbox
 
@@ -177,17 +177,17 @@ Edit `provisioning/hosts.yml` and fill in your values:
 
 Both domains must resolve to the server before the first deploy - Caddy requests certificates when it starts.
 
-### 2. Bootstrap root SSH key access
+### 2. Install your SSH key on the server
 
 > **Skip this step if your VPS provider already installed your SSH key at creation time** - most providers offer this during the server setup wizard. Only needed when your server was provisioned with password-only root access.
 
-Connects to the server once using the root password and installs your local public key into `/root/.ssh/authorized_keys`. After this step, all subsequent commands use key-based authentication - the password is no longer needed.
+Run on your machine, not in the toolbox. `ssh-copy-id` ships with OpenSSH, asks for the root password once, and appends your public key to `/root/.ssh/authorized_keys`:
 
 ```bash
-cd provisioning && ./provision make bootstrap
+ssh-copy-id -i ~/.ssh/id_ed25519.pub -p <ssh-port> root@<server-ip>
 ```
 
-You will be prompted for the root password interactively. The playbook detects your key type automatically, checking for `id_ed25519`, `id_ecdsa`, and `id_rsa` in that order.
+Use the public key you normally log in with (`id_ed25519.pub`, `id_ecdsa.pub`, or `id_rsa.pub`). After this step, all provisioning commands use key-based authentication - the password is no longer needed.
 
 ### 3. Generate registry credentials
 
@@ -535,7 +535,6 @@ curl -u registry:<password> http://localhost:5000/v2/_catalog
     ├── requirements.yml               # Ansible Galaxy roles and collections
     ├── hosts.yml.dist                 # Inventory template - copy to hosts.yml
     ├── preflight.yml                  # Pre-provisioning validation playbook
-    ├── bootstrap.yml                  # One-time root SSH key setup (password → key auth)
     ├── change-ssh-port.yml            # Change SSH port and update hosts.yml
     ├── server.yml                     # Main provisioning playbook
     ├── authorize.yml                  # SSH key authorization playbook
