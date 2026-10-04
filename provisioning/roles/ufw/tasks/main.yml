@@ -23,7 +23,10 @@
             community.general.ufw:
                 rule: allow
                 port: "443"
-                proto: tcp
+                proto: "{{ item }}"
+            loop:
+                - tcp
+                - udp
 
         -   name: Enable UFW with default deny incoming
             community.general.ufw:

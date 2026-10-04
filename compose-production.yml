@@ -1,17 +1,20 @@
 services:
-    nginx:
-        image: nginx:1.30.3-alpine3.23
+    caddy:
+        image: caddy:2.11.6-alpine
         restart: always
         ports:
             - "80:80"
             - "443:443"
+            - "443:443/udp"
         volumes:
-            - /etc/letsencrypt:/etc/letsencrypt:ro
-            - /var/www/html:/var/www/html:ro
-            - /etc/docker-registry/nginx:/etc/nginx/conf.d:ro
-            - ./htpasswd:/etc/nginx/auth/htpasswd:ro
+            # Directory mount: Ansible replaces the Caddyfile atomically, which a
+            # single-file bind mount would not pick up.
+            - /etc/docker-registry/caddy:/etc/caddy:ro
+            - ./users:/etc/caddy-auth/users:ro
+            - caddy_data:/data
+            - caddy_config:/config
         healthcheck:
-            test: ["CMD", "curl", "-f", "http://localhost/"]
+            test: ["CMD", "wget", "-q", "--spider", "http://127.0.0.1:2019/config/"]
             interval: 30s
             timeout: 5s
             retries: 3
@@ -83,6 +86,8 @@ services:
 volumes:
     registry:
     cache-registry:
+    caddy_data:
+    caddy_config:
 
 networks:
     registry-net:

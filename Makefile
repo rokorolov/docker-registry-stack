@@ -53,6 +53,8 @@ endif
 	ssh deploy@$(HOST) -p $(PORT) 'set -e; cd registry && { \
 		docker compose -p registry -f compose.yml.new pull; \
 		mv -f compose.yml.new compose.yml; \
+		sed "s/:/ /" htpasswd > users; \
 		docker compose -p registry up -d --remove-orphans; \
+		docker compose -p registry exec -T caddy caddy reload --config /etc/caddy/Caddyfile --adapter caddyfile; \
 	}'; \
 	echo "Deployment completed successfully"

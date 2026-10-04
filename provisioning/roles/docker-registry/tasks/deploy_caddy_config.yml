@@ -1,0 +1,19 @@
+---
+-   name: Create Caddy config directory
+    become: true
+    ansible.builtin.file:
+        path: "{{ registry_caddy_config_path }}"
+        state: directory
+        owner: root
+        group: root
+        mode: '0755'
+
+-   name: Deploy Caddyfile
+    become: true
+    ansible.builtin.template:
+        src: Caddyfile.j2
+        dest: "{{ registry_caddy_config_path }}/Caddyfile"
+        owner: root
+        group: root
+        mode: '0644'
+    notify: Reload Caddy
