@@ -636,7 +636,10 @@ Object storage protects against a failed disk or server, not against deletion: a
 
 Planned implementation:
 - R2 bucket and a bucket-scoped access token created once in the Cloudflare dashboard (documented step - keeps a broad Cloudflare API token out of the inventory)
-- Private registry configured to use the S3 storage driver (`regionendpoint` plus `forcepathstyle: true`, required by registry v3 for non-AWS endpoints); the cache registry stays on local disk, since its content can always be re-fetched from Docker Hub
+- Private registry configured to use the S3 storage driver; the cache registry stays on local disk, since its content can always be re-fetched from Docker Hub
+- Provider-neutral inventory variables (`registry_s3_*`, never `r2_*`), so switching between R2, AWS S3, Backblaze B2, Hetzner, or MinIO is a configuration change plus an `rclone sync` of the bucket - no code changes
+- An explicit `registry_s3_type` variable, either `aws` or `s3-compatible`, instead of inferring the provider from an empty endpoint. `s3-compatible` adds `regionendpoint` and `forcepathstyle: true` (required by registry v3 for non-AWS endpoints); `aws` sets neither. Two values rather than one per provider, because every non-AWS service needs identical driver settings
+- Preflight and role assertions that reject invalid combinations: an unknown type, `s3-compatible` without `registry_s3_endpoint`, or `aws` with a leftover endpoint
 - Credentials stored as inventory variables and rendered by Ansible into a root-only env file loaded by the registry container - never hardcoded in compose files
 - Migration of existing images with `rclone sync` (the on-disk layout and the bucket layout are identical)
 - Nightly bucket copy to a second provider
