@@ -78,7 +78,6 @@
                 mode: '0755'
                 content: |
                     #!/bin/sh
-                    # Skip silently if the registry stack is not running yet.
                     if [ -n "$(docker ps -q -f name=^registry-nginx-1$ -f status=running)" ]; then
                         docker exec registry-nginx-1 nginx -s reload
                     fi
