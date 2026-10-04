@@ -44,15 +44,41 @@
             register: port_check
             ignore_errors: yes
 
-        -   name: Start temporary Apache container for ACME challenge
-            ansible.builtin.shell: "docker run -d --name apache -v /var/www/html:/usr/local/apache2/htdocs/ -p 80:80 httpd:2.4"
-            when: port_check is defined and port_check.failed
+    tasks:
+        -   name: Issue certificates
+            block:
+                -   name: Start temporary Apache container for ACME challenge
+                    ansible.builtin.shell: "docker run -d --name apache -v /var/www/html:/usr/local/apache2/htdocs/ -p 80:80 httpd:2.4"
+                    when: port_check is failed
 
-    post_tasks:
-        -   name: Remove temporary Apache container
-            ansible.builtin.shell: "docker rm -f apache"
-            when: port_check is defined and port_check.failed
-            ignore_errors: yes
+                -   name: Install Certbot and issue missing certificates
+                    ansible.builtin.include_role:
+                        name: geerlingguy.certbot
+            # Runs even when issuance fails, so a leftover Apache container
+            # never blocks port 80 for the nginx container on the next deploy.
+            always:
+                -   name: Remove temporary Apache container
+                    ansible.builtin.shell: "docker rm -f apache"
+                    when: port_check is failed
+                    ignore_errors: yes
 
-    roles:
-        - geerlingguy.certbot
+        # Certbot runs scripts in this directory after every successful renewal,
+        # whether triggered by the role's cron job or the distro's certbot.timer.
+        # nginx only reads certificates on start/reload, so without this it keeps
+        # serving the old certificate until it expires.
+        -   name: Create Certbot deploy hook directory
+            ansible.builtin.file:
+                path: /etc/letsencrypt/renewal-hooks/deploy
+                state: directory
+                mode: '0755'
+
+        -   name: Install renewal hook that reloads nginx
+            ansible.builtin.copy:
+                dest: /etc/letsencrypt/renewal-hooks/deploy/reload-registry-nginx
+                mode: '0755'
+                content: |
+                    #!/bin/sh
+                    # Skip silently if the registry stack is not running yet.
+                    if [ -n "$(docker ps -q -f name=^registry-nginx-1$ -f status=running)" ]; then
+                        docker exec registry-nginx-1 nginx -s reload
+                    fi
