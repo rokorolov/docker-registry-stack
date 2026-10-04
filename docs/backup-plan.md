@@ -13,6 +13,7 @@ Only the private registry volume needs backing up:
 |---|---|---|
 | `registry_registry` | Yes | Stores your own pushed images — irreplaceable |
 | `registry_cache-registry` | No | Docker Hub pull-through cache — re-populates automatically on next pull |
+| `registry_caddy_data` | Optional | Caddy's TLS certificates and ACME account — avoids re-issuance (and Let's Encrypt rate limits) after a server rebuild |
 
 ---
 
@@ -96,7 +97,7 @@ all:
     vars:
         registry_domain: registry.example.com
         cache_registry_domain: cache-registry.example.com
-        certbot_admin_email: admin@example.com
+        acme_email: admin@example.com
         # Backup
         backup_aws_access_key_id: ""
         backup_aws_secret_access_key: ""

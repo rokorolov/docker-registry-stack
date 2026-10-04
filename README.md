@@ -5,7 +5,7 @@
 [![License](https://img.shields.io/badge/license-BSD-blue.svg)](LICENSE.md)
 [![Release](https://img.shields.io/github/v/tag/rokorolov/docker-registry-stack)](https://github.com/rokorolov/docker-registry-stack/releases/latest)
 
-Self-hosted private Docker registry with a Docker Hub pull-through cache, Nginx reverse proxy, TLS via Let's Encrypt, and Ansible provisioning.
+Self-hosted private Docker registry with a Docker Hub pull-through cache, Caddy reverse proxy with automatic TLS via Let's Encrypt, and Ansible provisioning.
 
 ## Contents
 
@@ -92,8 +92,8 @@ The pull-through cache is the single capability GHCR cannot replicate. If that i
 Internet
    │
    ▼
-Nginx (80/443)
-   │  TLS termination, HTTP→HTTPS redirect
+Caddy (80/443)
+   │  Automatic TLS, HTTP→HTTPS redirect
    │
    ├── registry.example.com ──────────────▶ Registry (5000)
    │   Basic auth (htpasswd)                 Private image storage
@@ -102,7 +102,7 @@ Nginx (80/443)
                                               Docker Hub pull-through cache
 ```
 
-Two independent registry containers run behind a single Nginx instance. The **private registry** stores your own images and requires authentication. The **cache registry** is a transparent pull-through proxy for Docker Hub - configure it as a registry mirror in your Docker daemon to avoid rate limits and speed up pulls. Nginx configs and SSL certificates are managed by Ansible and mounted into the container from the host - they are not part of the deployed application files.
+Two independent registry containers run behind a single Caddy instance. The **private registry** stores your own images and requires authentication. The **cache registry** is a transparent pull-through proxy for Docker Hub - configure it as a registry mirror in your Docker daemon to avoid rate limits and speed up pulls. The Caddyfile is rendered by Ansible and mounted into the container from the host - it is not part of the deployed application files. Caddy obtains and renews TLS certificates itself and stores them in the `caddy_data` volume.
 
 ## Prerequisites
 
@@ -116,7 +116,7 @@ Two independent registry containers run behind a single Nginx instance. The **pr
 | Disk (registry data) | depends on image count | plan for growth |
 | Network | 1 public IP, ports 80 and 443 open | - |
 
-The production stack (Nginx + two registry containers) is lightweight - under 250 MB RSS at idle. The only variable is disk space for stored images, which can range from a few MB to several GB per image. A standard 1 vCPU / 1 GB RAM VPS with 40 GB total disk is a comfortable starting point for a small team.
+The production stack (Caddy + two registry containers) is lightweight - under 250 MB RSS at idle. The only variable is disk space for stored images, which can range from a few MB to several GB per image. A standard 1 vCPU / 1 GB RAM VPS with 40 GB total disk is a comfortable starting point for a small team.
 
 ### Supported operating systems
 
@@ -173,9 +173,9 @@ Edit `provisioning/hosts.yml` and fill in your values:
 | `ansible_port` | SSH port (default: `22`) |
 | `registry_domain` | Domain for the private registry (e.g. `registry.example.com`) |
 | `cache_registry_domain` | Domain for the cache registry (e.g. `cache-registry.example.com`) |
-| `certbot_admin_email` | Email address for Let's Encrypt expiry notifications |
+| `acme_email` | Email address for Let's Encrypt account and expiry notifications |
 
-Both domains must resolve to the server before running the certbot step.
+Both domains must resolve to the server before the first deploy - Caddy requests certificates when it starts.
 
 ### 2. Bootstrap root SSH key access
 
@@ -191,7 +191,7 @@ You will be prompted for the root password interactively. The playbook detects y
 
 ### 3. Generate registry credentials
 
-The production `htpasswd` file is gitignored and must be created locally before deployment. Use bcrypt (`-B`) - Nginx's `auth_basic` module accepts MD5 and SHA as well, but both are cryptographically weak and trivially crackable offline.
+The production `htpasswd` file is gitignored and must be created locally before deployment. Use bcrypt (`-B`) - other `htpasswd` formats such as MD5 and SHA are cryptographically weak, trivially crackable offline, and not accepted by Caddy.
 
 ```bash
 # Create a new file with the first user
@@ -227,13 +227,13 @@ cd provisioning && ./provision make upgrade
 
 ### 6. Provision the server
 
-Installs Docker Engine, creates the `deploy` system user, and renders Nginx config templates to `/etc/docker-registry/nginx/` on the server.
+Installs Docker Engine, creates the `deploy` system user, and renders the Caddyfile to `/etc/docker-registry/caddy/` on the server. On servers set up before the Caddy migration it also removes Certbot, its renewal cron job, and `/etc/letsencrypt`.
 
 ```bash
 cd provisioning && ./provision make server
 ```
 
-This requires root SSH access. The playbook also configures UFW with a default-deny incoming policy, allowing only SSH (on the port configured in `hosts.yml`), HTTP (80), and HTTPS (443). After this step you can lock down the `root` account.
+This requires root SSH access. The playbook also configures UFW with a default-deny incoming policy, allowing only SSH (on the port configured in `hosts.yml`), HTTP (80), and HTTPS (443, TCP and UDP for HTTP/3). After this step you can lock down the `root` account.
 
 ### 7. Authorize your SSH key for deployments
 
@@ -243,19 +243,9 @@ Copies your public key to the `deploy` user's `authorized_keys`. The playbook au
 cd provisioning && ./provision make authorize
 ```
 
-### 8. Issue SSL certificates
+### 8. Deploy
 
-The playbook uses the webroot method. If port 80 is not yet occupied by any service, it temporarily starts an Apache container to serve the ACME challenge.
-
-```bash
-cd provisioning && ./provision make certbot
-```
-
-Both `registry_domain` and `cache_registry_domain` receive their own certificate.
-
-### 9. Deploy
-
-Run from the project root. Transfers the compose file and `htpasswd` to the server atomically, then starts the stack.
+Run from the project root. Transfers the compose file and `htpasswd` to the server atomically, then starts the stack. On first start Caddy obtains a certificate for both `registry_domain` and `cache_registry_domain`, which takes a few seconds.
 
 ```bash
 make deploy HOST=<server-ip> PORT=<ssh-port> HTPASSWD_FILE=./htpasswd
@@ -352,9 +342,8 @@ curl -u <username>:<password> https://registry.example.com/v2/myimage/tags/list
 
 - **Firewall:** UFW is configured by the provisioning playbook with a default-deny incoming policy. Only SSH, HTTP, and HTTPS are open. All other ports are blocked.
 - **Authentication:** Only the private registry (`registry_domain`) requires credentials. The cache registry is intentionally public and unauthenticated - anyone who can reach port 443 can pull through it. This is safe for public Docker Hub images, but see the warning below about Docker Hub credentials.
-- **TLS:** Both registries use TLS 1.2/1.3 only. HSTS with a two-year max-age is enforced. OCSP stapling is not configured - Let's Encrypt shut down its OCSP service in 2025.
-- **htpasswd:** Use bcrypt (`-B` flag). Nginx's `auth_basic` module technically accepts MD5 and SHA formats, but both are cryptographically weak and can be cracked offline in seconds - bcrypt is the only safe choice.
-- **Old Docker clients:** Nginx blocks Docker clients older than 1.6 (`user_agent` filter in the Nginx config) - they use an incompatible registry protocol.
+- **TLS:** Both registries use TLS 1.2/1.3 only. HSTS with a two-year max-age is enforced. Certificates are issued and renewed automatically by Caddy.
+- **htpasswd:** Use bcrypt (`-B` flag). The Caddyfile is configured for bcrypt hashes; `make deploy` converts the `htpasswd` file to Caddy's format on the server.
 - **Credentials file:** `htpasswd` and `provisioning/hosts.yml` are listed in `.gitignore`. Never commit either file.
 - **HTTP secret:** Registry v3 logs a startup warning if no HTTP secret is set. On a single-node deployment this is harmless - the secret only matters when multiple registry instances share a load-balancer (session stickiness for uploads). To suppress the warning, add `REGISTRY_HTTP_SECRET=<random-string>` to `~/registry/.env` on the server.
 - **SSH host key checking:** The provisioning toolbox runs Ansible inside a Docker container where `~/.ssh` is mounted read-only and owned by the host user. SSH refuses config files it does not own, so `ansible.cfg` sets `host_key_checking = False` and `-F /dev/null` to skip the SSH config file entirely. This means provisioning commands do not verify the server's host key against a known-hosts file. The risk is low for a server you own and provisioned yourself, but be aware that a compromised DNS or network MITM would not be detected. Provision over a trusted network.
@@ -398,27 +387,27 @@ The playbook handles the full sequence safely: opens the new port in UFW first (
 cd provisioning && ./provision make upgrade
 ```
 
-### Renew SSL certificates
+### TLS certificates
 
-Certbot renewal runs automatically on the server. After each successful renewal, a Certbot deploy hook (`/etc/letsencrypt/renewal-hooks/deploy/reload-registry-nginx`) reloads Nginx so the new certificate is served without a restart. To trigger a manual renewal:
+Caddy renews certificates automatically, roughly 30 days before expiry, with no cron job or reload step. Check the remaining validity with `./provision make status`. Certificates live in the `registry_caddy_data` volume - never delete it, or Caddy has to request new certificates and may hit Let's Encrypt rate limits.
 
-```bash
-cd provisioning && ./provision make certbot
-```
+### Update Caddy configuration
 
-### Update Nginx configuration
-
-Nginx configs are managed by Ansible. After editing `registry_domain`, `cache_registry_domain`, or the templates in `provisioning/roles/docker-registry/templates/`, re-provision to push the change:
+The Caddyfile is managed by Ansible. After editing `registry_domain`, `cache_registry_domain`, `acme_email`, or `provisioning/roles/docker-registry/templates/Caddyfile.j2`, re-provision to push the change:
 
 ```bash
 cd provisioning && ./provision make server
 ```
 
-Then restart Nginx on the server to reload the new config:
+Caddy reloads the new config automatically - no restart needed.
 
-```bash
-ssh deploy@<server-ip> -p <port> 'cd registry && docker compose exec nginx nginx -s reload'
-```
+### Upgrade from the Nginx version
+
+Servers provisioned before the switch to Caddy migrate in three steps:
+
+1. In `provisioning/hosts.yml`, rename `certbot_admin_email` to `acme_email`.
+2. Run `cd provisioning && ./provision make server`. This renders the Caddyfile and removes Certbot and `/etc/letsencrypt`. The running Nginx keeps its certificates in memory until the next step.
+3. Run `make deploy HOST=<server-ip> PORT=<ssh-port> HTPASSWD_FILE=./htpasswd` right away. Docker Compose removes the Nginx container and starts Caddy, which requests new certificates on startup.
 
 ### Delete images and run garbage collection
 
@@ -448,7 +437,7 @@ Runs GC on both the private registry and the cache registry without stopping the
 
 ### Back up registry data
 
-Only the private registry volume needs backing up - the cache re-populates automatically from Docker Hub on the next pull.
+Only the private registry volume needs backing up - the cache re-populates automatically from Docker Hub on the next pull. Optionally also back up `registry_caddy_data` so a server rebuild reuses the existing TLS certificates instead of requesting new ones.
 
 See [`docs/backup-plan.md`](docs/backup-plan.md) for the full implementation plan, including a ready-to-use backup script, an Ansible role for provisioning secrets and a cron job, and a step-by-step restore procedure.
 
@@ -461,11 +450,11 @@ htpasswd -Bc htpasswd <username>
 make deploy HOST=<server-ip> PORT=<ssh-port> HTPASSWD_FILE=./htpasswd
 ```
 
-The running Nginx process picks up the updated file immediately - no reload required, because Nginx reads `htpasswd` on each request.
+`make deploy` reloads Caddy after updating the credentials, so the change takes effect immediately.
 
 ### Update Docker image versions
 
-Images are pinned to `major.minor.patch` (nginx also includes the Alpine OS version) so updates are always explicit and reproducible. To upgrade, find the new tag on Docker Hub, update both `compose.yml` and `compose-production.yml`, then redeploy:
+Images are pinned to `major.minor.patch` so updates are always explicit and reproducible. To upgrade, find the new tag on Docker Hub, update both `compose.yml` and `compose-production.yml`, then redeploy:
 
 ```bash
 make deploy HOST=<server-ip> PORT=<ssh-port> HTPASSWD_FILE=./htpasswd
@@ -473,10 +462,10 @@ make deploy HOST=<server-ip> PORT=<ssh-port> HTPASSWD_FILE=./htpasswd
 
 | Image | Tag strategy | Rationale |
 |---|---|---|
-| `nginx` | `1.30.3-alpine3.23` | Stable branch (`1.30.x`). Pin the Alpine OS version to prevent a silent base-image change. |
+| `caddy` | `2.11.6-alpine` | Caddy 2 stable series. |
 | `registry` | `3.1.1` | Registry v3 is the current actively-maintained series; v2 received its last update in February 2025. |
 
-### Update Ansible Galaxy roles
+### Update Ansible Galaxy collections
 
 Bump the version in `provisioning/requirements.yml`, rebuild the toolbox image, then re-run server provisioning:
 
@@ -506,7 +495,7 @@ ssh root@<server-ip> -p <ssh-port> 'ufw delete <rule-number>'
 
 ## Local development
 
-The development stack exposes the private registry on port `5000` and the cache registry on port `5001`. It uses a pre-configured `htpasswd` file and plain HTTP - no TLS.
+The development stack exposes the private registry on port `5000` and the cache registry on port `5001`. It uses Caddy with a pre-configured users file and plain HTTP - no TLS.
 
 ```bash
 make init   # Pull images and start all services
@@ -519,9 +508,9 @@ make down   # Stop services
 | Private registry | `http://localhost:5000` |
 | Cache registry | `http://localhost:5001` |
 
-Dev credentials are defined in `docker/development/nginx/auth/htpasswd`. Docker automatically allows plain HTTP for loopback addresses (`127.0.0.1`), so no `--insecure-registry` flag is needed.
+Dev credentials are defined in `docker/development/caddy/users` (Caddy format: `username bcrypt-hash`). Docker automatically allows plain HTTP for loopback addresses (`127.0.0.1`), so no `--insecure-registry` flag is needed.
 
-Test that the registry is reachable (replace `<password>` with the value from the htpasswd file):
+Test that the registry is reachable (replace `<password>` with the dev password):
 
 ```bash
 curl -u registry:<password> http://localhost:5000/v2/_catalog
@@ -535,9 +524,9 @@ curl -u registry:<password> http://localhost:5000/v2/_catalog
 ├── compose-production.yml             # Production stack (ports 80/443)
 ├── Makefile                           # Local dev and deploy commands
 ├── docker/
-│   └── development/nginx/
-│       ├── auth/htpasswd              # Dev credentials (not for production)
-│       └── conf.d/                    # Dev Nginx configs (no TLS)
+│   └── development/caddy/
+│       ├── Caddyfile                  # Dev Caddy config (no TLS)
+│       └── users                      # Dev credentials (not for production)
 └── provisioning/
     ├── Dockerfile                     # Provisioning toolbox image
     ├── provision                      # Wrapper script - runs make inside the toolbox container
@@ -549,7 +538,6 @@ curl -u registry:<password> http://localhost:5000/v2/_catalog
     ├── bootstrap.yml                  # One-time root SSH key setup (password → key auth)
     ├── change-ssh-port.yml            # Change SSH port and update hosts.yml
     ├── server.yml                     # Main provisioning playbook
-    ├── certbot.yml                    # SSL certificate playbook
     ├── authorize.yml                  # SSH key authorization playbook
     ├── upgrade.yml                    # System upgrade playbook
     ├── status.yml                     # Live server status (containers, disk, firewall, TLS, API)
@@ -559,10 +547,9 @@ curl -u registry:<password> http://localhost:5000/v2/_catalog
         ├── ufw/                       # Configures UFW firewall rules
         ├── docker/                    # Installs Docker Engine
         ├── create-deploy-user/        # Creates the deploy system user
-        └── docker-registry/           # Deploys Nginx config templates
+        └── docker-registry/           # Deploys the Caddyfile, removes legacy Certbot
             └── templates/
-                ├── registry.conf.j2
-                └── cache-registry.conf.j2
+                └── Caddyfile.j2
 ```
 
 ## Roadmap
