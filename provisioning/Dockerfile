@@ -6,7 +6,7 @@ RUN apk add --no-cache \
     apache2-utils \
     sshpass
 
-RUN pip install --no-cache-dir "ansible-core>=2.17.0,<2.18.0"
+RUN pip install --no-cache-dir "ansible-core>=2.21.0,<2.22.0"
 
 COPY requirements.yml /tmp/requirements.yml
 RUN ansible-galaxy install -r /tmp/requirements.yml

@@ -36,8 +36,8 @@
                     echo "{{ item }} does not resolve — DNS record may be missing or not yet propagated"
                     exit 1
                 fi
-                if [ "$resolved" != "{{ ansible_default_ipv4.address }}" ]; then
-                    echo "{{ item }} resolves to '${resolved}', expected {{ ansible_default_ipv4.address }}"
+                if [ "$resolved" != "{{ ansible_facts['default_ipv4']['address'] }}" ]; then
+                    echo "{{ item }} resolves to '${resolved}', expected {{ ansible_facts['default_ipv4']['address'] }}"
                     exit 1
                 fi
             loop:

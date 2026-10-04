@@ -30,10 +30,12 @@ services:
                 max-file: "3"
 
     registry:
-        image: registry:3.1.1
+        image: registry:3.1.2
         restart: always
         environment:
             REGISTRY_LOG_LEVEL: info
+            # Optional: set in ~/registry/.env on the server to suppress the startup warning.
+            REGISTRY_HTTP_SECRET: ${REGISTRY_HTTP_SECRET:-}
         volumes:
             - registry:/var/lib/registry
         healthcheck:
@@ -51,7 +53,7 @@ services:
                 max-file: "3"
 
     cache-registry:
-        image: registry:3.1.1
+        image: registry:3.1.2
         restart: always
         environment:
             REGISTRY_LOG_LEVEL: info
@@ -61,6 +63,7 @@ services:
             # Optional: set in ~/registry/.env on the server to bypass Docker Hub rate limits.
             REGISTRY_PROXY_USERNAME: ${REGISTRY_PROXY_USERNAME:-}
             REGISTRY_PROXY_PASSWORD: ${REGISTRY_PROXY_PASSWORD:-}
+            REGISTRY_HTTP_SECRET: ${REGISTRY_HTTP_SECRET:-}
         volumes:
             - cache-registry:/var/lib/registry
         healthcheck:
