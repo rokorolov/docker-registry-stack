@@ -48,7 +48,7 @@ From a freshly created VPS with DNS records pointing at it, provisioning is comp
 Build artifacts from proprietary software contain your source code. Pushing to a third-party registry means trusting that registry with your IP. With this setup, images live on infrastructure you control, in a jurisdiction you choose.
 
 **Security that does not require a checklist.**
-TLS 1.2/1.3 only, HSTS with a two-year max-age, OCSP stapling, bcrypt-hashed credentials, and a default-deny firewall are all configured by the provisioning playbooks - not as optional hardening steps, but as the starting point. There is nothing to forget to enable.
+TLS 1.2/1.3 only, HSTS with a two-year max-age, bcrypt-hashed credentials, and a default-deny firewall are all configured by the provisioning playbooks - not as optional hardening steps, but as the starting point. There is nothing to forget to enable.
 
 **Re-run anything, safely.**
 All provisioning playbooks are idempotent. Re-running `make server` after a config change, a failed step, or a team member's first setup applies only what changed and leaves everything else untouched. No state to track, no teardown required.
@@ -321,6 +321,8 @@ After this, `docker pull nginx:alpine` will transparently proxy through the cach
 
 By default the cache registry proxies public Docker Hub images anonymously. To also cache private images or to raise the authenticated rate-limit tier, set Docker Hub credentials in `~/registry/.env` on the server - never in the compose file:
 
+> **Warning:** the cache registry is public. Once credentials are set, every private Docker Hub image that account can access becomes pullable by anyone through your cache. Use an account (or a read-only access token) that can only see images you are comfortable exposing.
+
 ```bash
 # ~/registry/.env on the server
 REGISTRY_PROXY_USERNAME=<dockerhub-username>
@@ -349,8 +351,8 @@ curl -u <username>:<password> https://registry.example.com/v2/myimage/tags/list
 ## Security notes
 
 - **Firewall:** UFW is configured by the provisioning playbook with a default-deny incoming policy. Only SSH, HTTP, and HTTPS are open. All other ports are blocked.
-- **Authentication:** Only the private registry (`registry_domain`) requires credentials. The cache registry is intentionally unauthenticated - it is protected by the firewall and should only be reachable from trusted hosts.
-- **TLS:** Both registries use TLS 1.2/1.3 only. HSTS with a two-year max-age is enforced. OCSP stapling is enabled.
+- **Authentication:** Only the private registry (`registry_domain`) requires credentials. The cache registry is intentionally public and unauthenticated - anyone who can reach port 443 can pull through it. This is safe for public Docker Hub images, but see the warning below about Docker Hub credentials.
+- **TLS:** Both registries use TLS 1.2/1.3 only. HSTS with a two-year max-age is enforced. OCSP stapling is not configured - Let's Encrypt shut down its OCSP service in 2025.
 - **htpasswd:** Use bcrypt (`-B` flag). Nginx's `auth_basic` module technically accepts MD5 and SHA formats, but both are cryptographically weak and can be cracked offline in seconds - bcrypt is the only safe choice.
 - **Old Docker clients:** Nginx blocks Docker clients older than 1.6 (`user_agent` filter in the Nginx config) - they use an incompatible registry protocol.
 - **Credentials file:** `htpasswd` and `provisioning/hosts.yml` are listed in `.gitignore`. Never commit either file.
@@ -386,7 +388,7 @@ Changing the default SSH port from 22 reduces exposure to automated scanning bot
 cd provisioning && ./provision make change-ssh-port PORT=2222
 ```
 
-The playbook handles the full sequence safely: opens the new port in UFW first (if UFW is active), updates `/etc/ssh/sshd_config`, validates the new config with `sshd -t` before restarting, removes the old UFW rule, restarts sshd, then verifies the new port is reachable. `ansible_port` in `hosts.yml` is updated automatically - all subsequent commands use the new port without any manual changes.
+The playbook handles the full sequence safely: opens the new port in UFW first (if UFW is active), updates `/etc/ssh/sshd_config`, validates the new config with `sshd -t`, restarts sshd, verifies the new port is reachable from your machine, then removes the old UFW rule. If the new port is reachable, `ansible_port` in `hosts.yml` is updated automatically - all subsequent commands use the new port without any manual changes. If it is not, the playbook prints a warning (usually a cloud-level firewall at your VPS provider) and leaves `hosts.yml` for you to update.
 
 > If the connection is interrupted after sshd restarts and the playbook cannot confirm the new port is reachable, use your VPS provider's out-of-band console to verify the service is running, then re-run the command.
 
@@ -398,7 +400,7 @@ cd provisioning && ./provision make upgrade
 
 ### Renew SSL certificates
 
-Certbot renewal runs automatically via cron on the server. To trigger a manual renewal:
+Certbot renewal runs automatically on the server. After each successful renewal, a Certbot deploy hook (`/etc/letsencrypt/renewal-hooks/deploy/reload-registry-nginx`) reloads Nginx so the new certificate is served without a restart. To trigger a manual renewal:
 
 ```bash
 cd provisioning && ./provision make certbot
