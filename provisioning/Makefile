@@ -1,12 +1,11 @@
 .DEFAULT_GOAL := help
 
-.PHONY: help build change-ssh-port preflight status logs gc requirements server authorize upgrade
+.PHONY: help build preflight status logs gc requirements server authorize upgrade
 
 help:
 	@echo "Usage: make <target>"
 	@echo ""
 	@echo "  build                          Build the provisioning toolbox Docker image"
-	@echo "  change-ssh-port PORT=<port>    Change the SSH port and update hosts.yml"
 	@echo "  preflight                      Verify inventory variables, SSH connectivity, disk space, and DNS"
 	@echo "  status                         Show live server status: containers, disk, firewall, TLS, API health"
 	@echo "  logs                           Show last 200 lines of registry logs (override: LINES=500)"
@@ -18,10 +17,6 @@ help:
 
 build:
 	docker build -t docker-registry-provision .
-
-change-ssh-port:
-	@test -n "$(PORT)" || (echo "PORT is required. Usage: make change-ssh-port PORT=2222" >&2 && exit 1)
-	ansible-playbook change-ssh-port.yml -i hosts.yml -e "new_ssh_port=$(PORT)"
 
 preflight:
 	ansible-playbook preflight.yml -i hosts.yml

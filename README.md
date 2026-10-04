@@ -170,7 +170,7 @@ Edit `provisioning/hosts.yml` and fill in your values:
 | Variable | Description |
 |---|---|
 | `ansible_host` | Server IP address |
-| `ansible_port` | SSH port (default: `22`) |
+| `ansible_port` | SSH port (default: `22`). If your server uses a non-default SSH port, set it here - every provisioning command connects on this port and the firewall allows it. |
 | `registry_domain` | Domain for the private registry (e.g. `registry.example.com`) |
 | `cache_registry_domain` | Domain for the cache registry (e.g. `cache-registry.example.com`) |
 | `acme_email` | Email address for Let's Encrypt account and expiry notifications |
@@ -188,6 +188,8 @@ ssh-copy-id -i ~/.ssh/id_ed25519.pub -p <ssh-port> root@<server-ip>
 ```
 
 Use the public key you normally log in with (`id_ed25519.pub`, `id_ecdsa.pub`, or `id_rsa.pub`). After this step, all provisioning commands use key-based authentication - the password is no longer needed.
+
+> **Want a non-default SSH port?** Change it now, before step 6 enables the firewall - see [Use a non-default SSH port](#use-a-non-default-ssh-port).
 
 ### 3. Generate registry credentials
 
@@ -369,17 +371,63 @@ cd provisioning && ./provision make logs
 cd provisioning && ./provision make logs LINES=500
 ```
 
-### Change the SSH port
+### Use a non-default SSH port
 
-Changing the default SSH port from 22 reduces exposure to automated scanning bots and eliminates most brute-force noise in auth logs. It is not a substitute for key-based authentication and a firewall, but it is a low-cost hardening step.
+Moving SSH off port 22 cuts down automated scanning and brute-force noise in the auth logs. It is not a substitute for key-based authentication and a firewall.
+
+**On a fresh server, change the port before `make server`.** UFW is still inactive at that point, so a mistake cannot lock you out at the firewall, and `make server` then enables UFW with only the new port allowed - port 22 is never opened.
+
+1. Log in on the current port and **keep this session open** until step 3 succeeds:
+
+   ```bash
+   ssh -p 22 root@<server-ip>
+   ```
+
+   On the server, set the new port in a drop-in file and restart SSH:
+
+   ```bash
+   echo "Port 2222" > /etc/ssh/sshd_config.d/10-port.conf
+   sshd -t
+   systemctl daemon-reload
+   if systemctl is-active --quiet ssh.socket; then
+       systemctl restart ssh.socket
+   else
+       systemctl restart ssh
+   fi
+   ```
+
+   Use the drop-in file rather than editing `sshd_config`: the main config includes `sshd_config.d/` first and the first `Port` wins, and package upgrades never overwrite it. `sshd -t` must print nothing. Ubuntu 24.04 and later start SSH through `ssh.socket`; Debian and older Ubuntu use the `ssh` service - the `if` handles both.
+
+2. If your VPS provider has a cloud firewall (Hetzner, AWS, DigitalOcean, and others), allow the new TCP port there. This is the most common reason a new port appears unreachable.
+
+3. From a **new** terminal, confirm the new port works:
+
+   ```bash
+   ssh -p 2222 root@<server-ip>
+   ```
+
+   If it fails, fix it from the session you kept open, or from your provider's web console.
+
+4. Set `ansible_port: 2222` in `provisioning/hosts.yml`, then continue with the normal steps - `./provision make preflight` confirms Ansible connects on the new port.
+
+**On a server that is already provisioned**, UFW is active. Allow the new port before restarting SSH, and remove the old rule only after step 3 succeeds:
 
 ```bash
-cd provisioning && ./provision make change-ssh-port PORT=2222
+ufw allow 2222/tcp          # before step 1's restart
+ufw delete allow 22/tcp     # after step 3 succeeds
 ```
 
-The playbook handles the full sequence safely: opens the new port in UFW first (if UFW is active), updates `/etc/ssh/sshd_config`, validates the new config with `sshd -t`, restarts sshd, verifies the new port is reachable from your machine, then removes the old UFW rule. If the new port is reachable, `ansible_port` in `hosts.yml` is updated automatically - all subsequent commands use the new port without any manual changes. If it is not, the playbook prints a warning (usually a cloud-level firewall at your VPS provider) and leaves `hosts.yml` for you to update.
+**When creating a new server**, most providers accept cloud-init user data, which sets the port before you ever log in:
 
-> If the connection is interrupted after sshd restarts and the playbook cannot confirm the new port is reachable, use your VPS provider's out-of-band console to verify the service is running, then re-run the command.
+```yaml
+#cloud-config
+write_files:
+  - path: /etc/ssh/sshd_config.d/10-port.conf
+    content: "Port 2222\n"
+runcmd:
+  - [systemctl, daemon-reload]
+  - [sh, -c, "systemctl restart ssh.socket 2>/dev/null || systemctl restart ssh"]
+```
 
 ### Upgrade system packages
 
@@ -535,7 +583,6 @@ curl -u registry:<password> http://localhost:5000/v2/_catalog
     ├── requirements.yml               # Ansible Galaxy roles and collections
     ├── hosts.yml.dist                 # Inventory template - copy to hosts.yml
     ├── preflight.yml                  # Pre-provisioning validation playbook
-    ├── change-ssh-port.yml            # Change SSH port and update hosts.yml
     ├── server.yml                     # Main provisioning playbook
     ├── authorize.yml                  # SSH key authorization playbook
     ├── upgrade.yml                    # System upgrade playbook
