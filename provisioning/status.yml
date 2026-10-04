@@ -14,8 +14,15 @@
             changed_when: false
             register: disk_df
 
+        # UFW is installed by `make server`; report its absence instead of
+        # failing so status is still useful on a partially provisioned host.
         -   name: UFW rules
-            ansible.builtin.command: ufw status
+            ansible.builtin.shell: |
+                if command -v ufw >/dev/null 2>&1; then
+                    ufw status
+                else
+                    echo "UFW not installed (run: make server)"
+                fi
             changed_when: false
             register: ufw_out
 

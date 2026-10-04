@@ -17,8 +17,8 @@
         -   name: Verify DNS records resolve to this server
             ansible.builtin.shell: |
                 resolved=$(getent hosts {{ item }} | awk '{print $1}')
-                if [ "$resolved" != "{{ ansible_default_ipv4.address }}" ]; then
-                    echo "{{ item }} resolves to '${resolved}', expected {{ ansible_default_ipv4.address }}"
+                if [ "$resolved" != "{{ ansible_facts['default_ipv4']['address'] }}" ]; then
+                    echo "{{ item }} resolves to '${resolved}', expected {{ ansible_facts['default_ipv4']['address'] }}"
                     exit 1
                 fi
             loop:
