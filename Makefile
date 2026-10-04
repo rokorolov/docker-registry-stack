@@ -51,10 +51,8 @@ endif
 	scp -P $(PORT) $(HTPASSWD_FILE) deploy@$(HOST):registry/htpasswd; \
 	echo "Deploying services..."; \
 	ssh deploy@$(HOST) -p $(PORT) 'set -e; cd registry && { \
+		docker compose -p registry -f compose.yml.new pull; \
 		mv -f compose.yml.new compose.yml; \
-		echo "COMPOSE_PROJECT_NAME=registry" > .env; \
-		docker compose down --remove-orphans; \
-		docker compose pull; \
-		docker compose up -d; \
+		docker compose -p registry up -d --remove-orphans; \
 	}'; \
 	echo "Deployment completed successfully"
