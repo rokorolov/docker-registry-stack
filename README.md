@@ -554,13 +554,43 @@ curl -u registry:<password> http://localhost:5000/v2/_catalog
 
 ## Roadmap
 
+Planned improvements, listed in the order they are expected to land.
+
+### Monitoring and alerting
+
+Today the only health check is running `make status` by hand - a full disk or a stopped registry is first noticed when CI jobs fail. The plan adds two complementary layers, both on free tiers:
+
+- **External checks** (UptimeRobot or Better Stack) probe both registries from the internet every few minutes: `https://<registry_domain>/v2/` must return 401, `https://<cache_registry_domain>/v2/` must return 200, and certificate expiry is tracked for both domains. This catches DNS, firewall, TLS, and reachability problems.
+- **Heartbeat from the server** (Healthchecks.io). An Ansible role installs a small script that cron runs every 5 minutes. It checks that disk usage on `/` is below 85% and that all three containers report `healthy`, then pings a check URL - or pings its `/fail` endpoint with the reason. If the server goes down, the pings stop and Healthchecks.io raises the alert after the grace period.
+- `make gc` reports to the same check, so failed garbage collection runs are noticed too.
+
+Planned implementation:
+- Ansible role for the heartbeat script and cron job, with the ping URL as an inventory variable
+- README setup guide for the external checks
+
+### Encrypted inventory
+
+`provisioning/hosts.yml`, `htpasswd`, and server secrets currently exist only on the operator's machine. Losing that machine means reconstructing them, and switching servers overwrites the only inventory. Because this repository is public, the real inventory must never be committed here either.
+
+Planned implementation:
+- Real inventory, secrets, and `htpasswd` kept in a separate private repository, encrypted with `ansible-vault` (already included in the toolbox image - no new tools)
+- `INVENTORY ?= hosts.yml` in the provisioning Makefile, so the inventory can live outside this repository and several servers can be managed side by side
+- Vault password supplied by a password-manager script via `--vault-password-file`; `./provision` already forwards `ANSIBLE_*` variables into the container
+- `make deploy` decrypts `htpasswd` to a temporary file for the upload
+
 ### Object storage backend
 
 The registry supports S3-compatible storage natively. The planned change moves image data off the server disk to Cloudflare R2 (free egress, generous free tier) or AWS S3, making the server stateless - pure compute with no persistent data.
 
-The key operational benefit: if the server dies, provision a fresh VPS, point the new registry at the same bucket, and recovery is complete in ~15 minutes. No data is lost because the data was never on the server. Disk space monitoring and garbage collection become non-issues.
+The key operational benefit: if the server dies, provision a fresh VPS, point the new registry at the same bucket, and recovery is complete in ~15 minutes. No data is lost because the data was never on the server. Disk space monitoring for the private registry becomes a non-issue. Garbage collection is still needed to free bucket storage, but no longer risks filling the server disk.
+
+Image layer downloads are redirected to presigned bucket URLs by default, so pulls are served directly by R2 rather than through the VPS - server bandwidth stops being a bottleneck.
+
+Object storage protects against a failed disk or server, not against deletion: a garbage collection bug or leaked credentials could still empty the bucket. A nightly copy to a second provider (for example Backblaze B2) covers that case and replaces the stop-and-sync approach in [`docs/backup-plan.md`](docs/backup-plan.md) with a bucket-to-bucket copy that needs no downtime.
 
 Planned implementation:
-- Ansible role to provision the R2 bucket and credentials
-- Registry and cache-registry configured to use the S3 storage driver
-- Secrets managed via inventory variables, not hardcoded in compose files
+- R2 bucket and a bucket-scoped access token created once in the Cloudflare dashboard (documented step - keeps a broad Cloudflare API token out of the inventory)
+- Private registry configured to use the S3 storage driver (`regionendpoint` plus `forcepathstyle: true`, required by registry v3 for non-AWS endpoints); the cache registry stays on local disk, since its content can always be re-fetched from Docker Hub
+- Credentials stored as inventory variables and rendered by Ansible into a root-only env file loaded by the registry container - never hardcoded in compose files
+- Migration of existing images with `rclone sync` (the on-disk layout and the bucket layout are identical)
+- Nightly bucket copy to a second provider
