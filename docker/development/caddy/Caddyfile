@@ -1,0 +1,14 @@
+{
+	auto_https off
+}
+
+:5000 {
+	basic_auth /v2/* {
+		import /etc/caddy-auth/users
+	}
+	reverse_proxy registry:5000
+}
+
+:5001 {
+	reverse_proxy cache-registry:5000
+}
