@@ -1,3 +1,3 @@
 /.idea
 /provisioning/hosts.yml
-/htpasswd
+htpasswd

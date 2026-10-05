@@ -17,6 +17,7 @@ Self-hosted private Docker registry with a Docker Hub pull-through cache, Caddy 
 - [Getting Started](#getting-started)
 - [Using the Registries](#using-the-registries)
 - [Security Notes](#security-notes)
+- [Custom SSH Port](#custom-ssh-port)
 - [Day-2 Operations](#day-2-operations)
 - [Local Development](#local-development)
 - [Project Structure](#project-structure)
@@ -122,7 +123,7 @@ The production stack (Caddy + two registry containers) is lightweight - under 25
 
 | Layer | Supported OS |
 |---|---|
-| Remote server | Ubuntu 22.04 LTS (Jammy) / 24.04 LTS (Noble) - Debian 11 (Bullseye) / 12 (Bookworm) (any APT-based distro should work) |
+| Remote server | Ubuntu 22.04 LTS (Jammy) / 24.04 LTS (Noble) / 26.04 LTS (Resolute) - Debian 11 (Bullseye) / 12 (Bookworm) (any APT-based distro should work) |
 | Control node (provisioning + deploy) | Linux, macOS |
 | Local development (Docker only) | Linux, macOS, Windows |
 
@@ -140,7 +141,7 @@ Ansible, `apache2-utils`, and all other provisioning dependencies are bundled in
 
 ## Getting Started
 
-> All commands in this section run from the `provisioning/` directory - `cd provisioning` once before starting.
+> Run every command from the project root. Provisioning commands start with `cd provisioning &&` - return to the project root (`cd ..`) before the next step.
 >
 > Steps **2** (Install your SSH key) and **7** (Authorize deploy user) are optional - skip them if your VPS provider installed your SSH key at server creation time.
 
@@ -174,6 +175,7 @@ Edit `provisioning/hosts.yml` and fill in your values:
 | `registry_domain` | Domain for the private registry (e.g. `registry.example.com`) |
 | `cache_registry_domain` | Domain for the cache registry (e.g. `cache-registry.example.com`) |
 | `acme_email` | Email address for Let's Encrypt account and expiry notifications |
+| `ssh_hardening` | Disable SSH password logins (default: `true`). Set to `false` if you need password logins - see [Security notes](#security-notes) |
 
 Both domains must resolve to the server before the first deploy - Caddy requests certificates when it starts.
 
@@ -187,13 +189,15 @@ Run on your machine, not in the toolbox. `ssh-copy-id` ships with OpenSSH, asks 
 ssh-copy-id -i ~/.ssh/id_ed25519.pub -p <ssh-port> root@<server-ip>
 ```
 
-Use the public key you normally log in with (`id_ed25519.pub`, `id_ecdsa.pub`, or `id_rsa.pub`). After this step, all provisioning commands use key-based authentication - the password is no longer needed.
+Use the public key you normally log in with (`id_ed25519.pub`, `id_ecdsa.pub`, or `id_rsa.pub`). After this step, all provisioning commands use key-based authentication - the password is no longer needed, and step 6 disables SSH password logins entirely (unless you set `ssh_hardening: false`).
 
-> **Want a non-default SSH port?** Change it now, before step 6 enables the firewall - see [Use a non-default SSH port](#use-a-non-default-ssh-port).
+> **Want a non-default SSH port?** Change it now, before step 6 enables the firewall - see [Custom SSH port](#custom-ssh-port).
 
 ### 3. Generate registry credentials
 
-The production `htpasswd` file is gitignored and must be created locally before deployment. Use bcrypt (`-B`) - other `htpasswd` formats such as MD5 and SHA are cryptographically weak, trivially crackable offline, and not accepted by Caddy.
+Run from the project root, so the file sits where the step 8 example (`HTPASSWD_FILE=./htpasswd`) expects it.
+
+The production `htpasswd` file must be created locally before deployment. Use bcrypt (`-B`) - other `htpasswd` formats such as MD5 and SHA are cryptographically weak, trivially crackable offline, and not accepted by Caddy.
 
 ```bash
 # Create a new file with the first user
@@ -209,7 +213,7 @@ If `htpasswd` is not installed, use the Docker equivalent:
 docker run --rm httpd:2.4 htpasswd -nbB <username> <password> >> htpasswd
 ```
 
-Keep `htpasswd` out of version control - it is already listed in `.gitignore`.
+Keep `htpasswd` out of version control - `.gitignore` ignores any file named `htpasswd`, wherever you create it.
 
 ### 4. Run preflight checks
 
@@ -235,7 +239,7 @@ Installs Docker Engine, creates the `deploy` system user, and renders the Caddyf
 cd provisioning && ./provision make server
 ```
 
-This requires root SSH access. The playbook also configures UFW with a default-deny incoming policy, allowing only SSH (on the port configured in `hosts.yml`), HTTP (80), and HTTPS (443, TCP and UDP for HTTP/3). After this step you can lock down the `root` account.
+This requires root SSH access with your key. The playbook also disables SSH password logins unless `ssh_hardening` is `false` (see [Security notes](#security-notes)) and configures UFW with a default-deny incoming policy, allowing only SSH (on the port configured in `hosts.yml`), HTTP (80), and HTTPS (443, TCP and UDP for HTTP/3).
 
 ### 7. Authorize your SSH key for deployments
 
@@ -342,6 +346,7 @@ curl -u <username>:<password> https://registry.example.com/v2/myimage/tags/list
 
 ## Security notes
 
+- **SSH:** `make server` writes `/etc/ssh/sshd_config.d/01-hardening.conf`, which disables password and keyboard-interactive logins and limits `root` to key-based login (`PermitRootLogin prohibit-password` - provisioning still connects as `root` with your key). The file sorts before cloud-init's `50-cloud-init.conf`, because sshd uses the first value it reads for these options, and the playbook fails if the effective settings do not match. Check them on the server with `sshd -T | grep -E '^(passwordauthentication|kbdinteractiveauthentication|permitrootlogin) '`. If you lose your SSH key, use your VPS provider's web console - password login over SSH no longer works. To keep password logins enabled, set `ssh_hardening: false` in `hosts.yml`; `make server` then removes `01-hardening.conf` again, so the setting can be switched either way at any time.
 - **Firewall:** UFW is configured by the provisioning playbook with a default-deny incoming policy. Only SSH, HTTP, and HTTPS are open. All other ports are blocked.
 - **Authentication:** Only the private registry (`registry_domain`) requires credentials. The cache registry is intentionally public and unauthenticated - anyone who can reach port 443 can pull through it. This is safe for public Docker Hub images, but see the warning below about Docker Hub credentials.
 - **TLS:** Both registries use TLS 1.2/1.3 only. HSTS with a two-year max-age is enforced. Certificates are issued and renewed automatically by Caddy.
@@ -349,6 +354,85 @@ curl -u <username>:<password> https://registry.example.com/v2/myimage/tags/list
 - **Credentials file:** `htpasswd` and `provisioning/hosts.yml` are listed in `.gitignore`. Never commit either file.
 - **HTTP secret:** Registry v3 logs a startup warning if no HTTP secret is set. On a single-node deployment this is harmless - the secret only matters when multiple registry instances share a load-balancer (session stickiness for uploads). To suppress the warning, add `REGISTRY_HTTP_SECRET=<random-string>` to `~/registry/.env` on the server.
 - **SSH host key checking:** The provisioning toolbox runs Ansible inside a Docker container where `~/.ssh` is mounted read-only and owned by the host user. SSH refuses config files it does not own, so `ansible.cfg` sets `host_key_checking = False` and `-F /dev/null` to skip the SSH config file entirely. This means provisioning commands do not verify the server's host key against a known-hosts file. The risk is low for a server you own and provisioned yourself, but be aware that a compromised DNS or network MITM would not be detected. Provision over a trusted network.
+
+## Custom SSH port
+
+Moving SSH off port 22 cuts down automated scanning and brute-force noise in the auth logs. It is not a substitute for key-based authentication and a firewall.
+
+Pick the path that matches your server:
+
+- [Fresh server](#fresh-server) - before `make server` has run (recommended: the firewall is not active yet)
+- [Already provisioned server](#already-provisioned-server) - UFW is active, so open the new port first
+- [At server creation with cloud-init](#at-server-creation-with-cloud-init) - set the port before you ever log in
+
+### Fresh server
+
+Change the port **before** `make server`. UFW is still inactive at that point, so a mistake cannot lock you out at the firewall, and `make server` then enables UFW with only the new port allowed - port 22 is never opened.
+
+1. Log in on the current port and **keep this session open** until step 3 succeeds:
+
+   ```bash
+   ssh -p 22 root@<server-ip>
+   ```
+
+   On the server, set the new port in a drop-in file, check it, and restart SSH:
+
+   ```bash
+   echo "Port 2222" > /etc/ssh/sshd_config.d/10-port.conf
+   sshd -t
+   sshd -T | grep '^port '
+   systemctl daemon-reload
+   if systemctl is-active --quiet ssh.socket; then
+       systemctl restart ssh.socket
+   else
+       systemctl restart ssh
+   fi
+   ```
+
+   Before restarting, check the output: `sshd -t` must print nothing, and `sshd -T | grep '^port '` must print only `port 2222` - see [Why a drop-in file](#why-a-drop-in-file) if it also shows `port 22`. Ubuntu 24.04 and later start SSH through `ssh.socket`; Debian and older Ubuntu use the `ssh` service - the `if` handles both.
+
+2. If your VPS provider has a cloud firewall (Hetzner, AWS, DigitalOcean, and others), allow the new TCP port there. This is the most common reason a new port appears unreachable.
+
+3. From a **new** terminal, confirm the new port works:
+
+   ```bash
+   ssh -p 2222 root@<server-ip>
+   ```
+
+   If it fails, fix it from the session you kept open, or from your provider's web console.
+
+4. Set `ansible_port: 2222` in `provisioning/hosts.yml`, then continue with the normal steps - `./provision make preflight` confirms Ansible connects on the new port.
+
+### Already provisioned server
+
+UFW is active, so follow the [Fresh server](#fresh-server) steps with two additions: allow the new port before restarting SSH in step 1, and remove the old rule only after step 3 succeeds.
+
+```bash
+ufw allow 2222/tcp          # before the restart in step 1
+ufw delete allow 22/tcp     # after step 3 succeeds
+```
+
+### At server creation with cloud-init
+
+Most providers accept cloud-init user data when you create a server. This sets the port before you ever log in; then continue with step 2 of [Fresh server](#fresh-server):
+
+```yaml
+#cloud-config
+write_files:
+  - path: /etc/ssh/sshd_config.d/10-port.conf
+    content: "Port 2222\n"
+runcmd:
+  - [systemctl, daemon-reload]
+  - [sh, -c, "systemctl restart ssh.socket 2>/dev/null || systemctl restart ssh"]
+```
+
+### Why a drop-in file
+
+The commands above write `/etc/ssh/sshd_config.d/10-port.conf` instead of editing `/etc/ssh/sshd_config`:
+
+- **Package upgrades stay clean.** Files in `sshd_config.d/` are never touched by upgrades, while an edited main config triggers conffile prompts on `openssh-server` upgrades.
+- **`Port` values are combined, not overridden.** Unlike most settings, sshd listens on every `Port` from every config file. If the main config still has an uncommented `Port 22` line, SSH listens on both ports. Fresh installs ship it commented out (`#Port 22`); otherwise comment it out first.
+- **Single-value settings work the other way.** For options such as `PasswordAuthentication`, the first value read wins, and `sshd_config.d/` is read before the rest of the main config - so an edit to the main config can be silently overridden by a drop-in like cloud-init's `50-cloud-init.conf`. This is why `make server` names its hardening file `01-hardening.conf` (see [Security notes](#security-notes)).
 
 ## Day-2 operations
 
@@ -369,69 +453,6 @@ cd provisioning && ./provision make logs
 
 # Show more lines
 cd provisioning && ./provision make logs LINES=500
-```
-
-### Use a non-default SSH port
-
-Moving SSH off port 22 cuts down automated scanning and brute-force noise in the auth logs. It is not a substitute for key-based authentication and a firewall.
-
-**On a fresh server, change the port before `make server`.** UFW is still inactive at that point, so a mistake cannot lock you out at the firewall, and `make server` then enables UFW with only the new port allowed - port 22 is never opened.
-
-1. Log in on the current port and **keep this session open** until step 3 succeeds:
-
-   ```bash
-   ssh -p 22 root@<server-ip>
-   ```
-
-   On the server, set the new port in a drop-in file and restart SSH:
-
-   ```bash
-   echo "Port 2222" > /etc/ssh/sshd_config.d/10-port.conf
-   sshd -t
-   sshd -T | grep '^port '
-   systemctl daemon-reload
-   if systemctl is-active --quiet ssh.socket; then
-       systemctl restart ssh.socket
-   else
-       systemctl restart ssh
-   fi
-   ```
-
-   Before restarting, check the output: `sshd -t` must print nothing, and `sshd -T | grep '^port '` must print only `port 2222`. Unlike most settings, `Port` values from all config files are combined, not overridden - if the main `/etc/ssh/sshd_config` still has an uncommented `Port 22` line, SSH would listen on both ports. Fresh installs ship it commented out (`#Port 22`); otherwise comment it out first.
-
-   Prefer the drop-in file over editing `sshd_config` directly: package upgrades never touch files in `sshd_config.d/`, while an edited main config triggers conffile prompts on `openssh-server` upgrades. For single-value settings such as `PasswordAuthentication`, the first value read wins and `sshd_config.d/` is read first - so an edit to the main config can be silently overridden by a drop-in like cloud-init's `50-cloud-init.conf`.
-
-   Ubuntu 24.04 and later start SSH through `ssh.socket`; Debian and older Ubuntu use the `ssh` service - the `if` handles both.
-
-2. If your VPS provider has a cloud firewall (Hetzner, AWS, DigitalOcean, and others), allow the new TCP port there. This is the most common reason a new port appears unreachable.
-
-3. From a **new** terminal, confirm the new port works:
-
-   ```bash
-   ssh -p 2222 root@<server-ip>
-   ```
-
-   If it fails, fix it from the session you kept open, or from your provider's web console.
-
-4. Set `ansible_port: 2222` in `provisioning/hosts.yml`, then continue with the normal steps - `./provision make preflight` confirms Ansible connects on the new port.
-
-**On a server that is already provisioned**, UFW is active. Allow the new port before restarting SSH, and remove the old rule only after step 3 succeeds:
-
-```bash
-ufw allow 2222/tcp          # before step 1's restart
-ufw delete allow 22/tcp     # after step 3 succeeds
-```
-
-**When creating a new server**, most providers accept cloud-init user data, which sets the port before you ever log in:
-
-```yaml
-#cloud-config
-write_files:
-  - path: /etc/ssh/sshd_config.d/10-port.conf
-    content: "Port 2222\n"
-runcmd:
-  - [systemctl, daemon-reload]
-  - [sh, -c, "systemctl restart ssh.socket 2>/dev/null || systemctl restart ssh"]
 ```
 
 ### Upgrade system packages
@@ -595,6 +616,7 @@ curl -u registry:<password> http://localhost:5000/v2/_catalog
     ├── logs.yml                       # Tail container logs from both registries
     ├── gc.yml                         # Garbage collection for private and cache registries
     └── roles/
+        ├── ssh-hardening/             # Disables SSH password logins
         ├── ufw/                       # Configures UFW firewall rules
         ├── docker/                    # Installs Docker Engine
         ├── create-deploy-user/        # Creates the deploy system user
