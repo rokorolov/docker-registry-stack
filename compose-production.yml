@@ -39,6 +39,8 @@ services:
             REGISTRY_LOG_LEVEL: info
             # Optional: set in ~/registry/.env on the server to suppress the startup warning.
             REGISTRY_HTTP_SECRET: ${REGISTRY_HTTP_SECRET:-}
+            # Set to true only by `make gc`, so pushes are refused while garbage is collected.
+            REGISTRY_STORAGE_MAINTENANCE_READONLY: '{"enabled": ${REGISTRY_READONLY:-false}}'
         volumes:
             - registry:/var/lib/registry
         healthcheck:

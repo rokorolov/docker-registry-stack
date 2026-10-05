@@ -501,7 +501,9 @@ curl -X DELETE -u <username>:<password> \
 cd provisioning && ./provision make gc
 ```
 
-Runs GC on both the private registry and the cache registry without stopping the containers. Pause any CI pipelines that push images before running to avoid a race condition.
+Garbage collection is stop-the-world: a layer pushed during the sweep could be deleted. `make gc` therefore restarts the private registry in read-only mode, runs the collection, and restarts it in read-write mode afterwards - even if the collection fails. Pulls keep working throughout, apart from a few seconds during each restart; pushes are refused with HTTP 405 until it finishes.
+
+The cache registry is not garbage collected: it removes cached content on its own once `REGISTRY_PROXY_TTL` (168h) expires.
 
 ### Back up registry data
 
