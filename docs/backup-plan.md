@@ -1,7 +1,6 @@
 # Registry Backup Implementation Plan
 
 Automated daily backup of the private registry volume to S3-compatible storage.
-Follows the same patterns used in `backend/docker/common/mariadb-backup/backup.sh`.
 
 ---
 

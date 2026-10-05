@@ -137,7 +137,7 @@ The production stack (Caddy + two registry containers) is lightweight - under 25
 | SSH access to the server | Provisioning and deployment |
 | Two DNS records pointed at the server | TLS certificate issuance (one per registry) |
 
-Ansible, `apache2-utils`, and all other provisioning dependencies are bundled in the toolbox Docker image - nothing else needs to be installed locally.
+Ansible, the Galaxy collections, and all other provisioning dependencies are bundled in the toolbox Docker image - nothing else needs to be installed locally.
 
 ## Getting Started
 
