@@ -349,6 +349,7 @@ curl -u <username>:<password> https://registry.example.com/v2/myimage/tags/list
 ## Security notes
 
 - **SSH:** `make server` writes `/etc/ssh/sshd_config.d/01-hardening.conf`, which disables password and keyboard-interactive logins and limits `root` to key-based login (`PermitRootLogin prohibit-password` - provisioning still connects as `root` with your key). The file sorts before cloud-init's `50-cloud-init.conf`, because sshd uses the first value it reads for these options, and the playbook fails if the effective settings do not match. Check them on the server with `sshd -T | grep -E '^(passwordauthentication|kbdinteractiveauthentication|permitrootlogin) '`. If you lose your SSH key, use your VPS provider's web console - password login over SSH no longer works. To keep password logins enabled, set `ssh_hardening: false` in `hosts.yml`; `make server` then removes `01-hardening.conf` again, so the setting can be switched either way at any time.
+- **Security updates:** `make server` enables `unattended-upgrades`, which installs OS security updates daily. It uses the distribution's default origins, so packages from the Docker repository are never upgraded automatically, and it never reboots - use `make upgrade REBOOT=true` when a reboot is needed.
 - **Firewall:** UFW is configured by the provisioning playbook with a default-deny incoming policy. Only SSH, HTTP, and HTTPS are open. All other ports are blocked.
 - **Authentication:** Only the private registry (`registry_domain`) requires credentials. The cache registry is intentionally public and unauthenticated - anyone who can reach port 443 can pull through it. This is safe for public Docker Hub images, but see the warning below about Docker Hub credentials.
 - **TLS:** Both registries use TLS 1.2/1.3 only. HSTS with a two-year max-age is enforced. Certificates are issued and renewed automatically by Caddy.
@@ -459,8 +460,16 @@ cd provisioning && ./provision make logs LINES=500
 
 ### Upgrade system packages
 
+Security updates install automatically every day (see [Security notes](#security-notes)). For a full upgrade of all packages:
+
 ```bash
 cd provisioning && ./provision make upgrade
+```
+
+If the upgrade needs a reboot (for example a new kernel), the command says so but does not reboot. Reboot when convenient - the registry is unavailable for about a minute:
+
+```bash
+cd provisioning && ./provision make upgrade REBOOT=true
 ```
 
 ### TLS certificates
@@ -613,6 +622,7 @@ curl -u registry:<password> http://localhost:5000/v2/_catalog
     ├── gc.yml                         # Garbage collection for private and cache registries
     └── roles/
         ├── ssh-hardening/             # Disables SSH password logins
+        ├── security-updates/          # Daily unattended OS security updates
         ├── ufw/                       # Configures UFW firewall rules
         ├── docker/                    # Installs Docker Engine
         ├── create-deploy-user/        # Creates the deploy system user

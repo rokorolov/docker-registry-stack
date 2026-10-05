@@ -17,4 +17,9 @@
 
         -   name: Reboot if kernel was upgraded
             ansible.builtin.reboot:
-            when: reboot_required.stat.exists
+            when: reboot_required.stat.exists and (reboot | default(false) | bool)
+
+        -   name: Warn about pending reboot
+            ansible.builtin.debug:
+                msg: "A reboot is required to finish the upgrade. Run: make upgrade REBOOT=true"
+            when: reboot_required.stat.exists and not (reboot | default(false) | bool)

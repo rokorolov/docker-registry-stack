@@ -4,6 +4,7 @@
     remote_user: root
     roles:
         - ssh-hardening
+        - security-updates
         - ufw
         - docker
         - create-deploy-user

@@ -13,7 +13,7 @@ help:
 	@echo "  requirements                   Install Ansible Galaxy roles and collections (local Ansible only)"
 	@echo "  server                         Provision the server (docker, deploy user, Caddy config)"
 	@echo "  authorize                      Authorize SSH keys for the deploy user"
-	@echo "  upgrade                        Upgrade and clean APT packages on the server"
+	@echo "  upgrade                        Upgrade and clean APT packages (reboot only with REBOOT=true)"
 
 build:
 	docker build -t docker-registry-provision .
@@ -40,4 +40,4 @@ authorize:
 	ansible-playbook authorize.yml -i hosts.yml
 
 upgrade:
-	ansible-playbook upgrade.yml -i hosts.yml
+	ansible-playbook upgrade.yml -i hosts.yml $(if $(REBOOT),-e "reboot=$(REBOOT)",)
