@@ -3,6 +3,7 @@
     hosts: all
     remote_user: root
     roles:
+        - ssh-hardening
         - ufw
         - docker
         - create-deploy-user

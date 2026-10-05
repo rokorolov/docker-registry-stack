@@ -3,6 +3,7 @@ all:
         registry_domain: registry.example.com
         cache_registry_domain: cache-registry.example.com
         acme_email: admin@example.com
+        ssh_hardening: true    # false keeps SSH password logins enabled
     hosts:
         server:
             ansible_connection: ssh

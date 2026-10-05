@@ -174,6 +174,7 @@ Edit `provisioning/hosts.yml` and fill in your values:
 | `registry_domain` | Domain for the private registry (e.g. `registry.example.com`) |
 | `cache_registry_domain` | Domain for the cache registry (e.g. `cache-registry.example.com`) |
 | `acme_email` | Email address for Let's Encrypt account and expiry notifications |
+| `ssh_hardening` | Disable SSH password logins (default: `true`). Set to `false` if you need password logins - see [Security notes](#security-notes) |
 
 Both domains must resolve to the server before the first deploy - Caddy requests certificates when it starts.
 
@@ -187,7 +188,7 @@ Run on your machine, not in the toolbox. `ssh-copy-id` ships with OpenSSH, asks 
 ssh-copy-id -i ~/.ssh/id_ed25519.pub -p <ssh-port> root@<server-ip>
 ```
 
-Use the public key you normally log in with (`id_ed25519.pub`, `id_ecdsa.pub`, or `id_rsa.pub`). After this step, all provisioning commands use key-based authentication - the password is no longer needed.
+Use the public key you normally log in with (`id_ed25519.pub`, `id_ecdsa.pub`, or `id_rsa.pub`). After this step, all provisioning commands use key-based authentication - the password is no longer needed, and step 6 disables SSH password logins entirely (unless you set `ssh_hardening: false`).
 
 > **Want a non-default SSH port?** Change it now, before step 6 enables the firewall - see [Use a non-default SSH port](#use-a-non-default-ssh-port).
 
@@ -235,7 +236,7 @@ Installs Docker Engine, creates the `deploy` system user, and renders the Caddyf
 cd provisioning && ./provision make server
 ```
 
-This requires root SSH access. The playbook also configures UFW with a default-deny incoming policy, allowing only SSH (on the port configured in `hosts.yml`), HTTP (80), and HTTPS (443, TCP and UDP for HTTP/3). After this step you can lock down the `root` account.
+This requires root SSH access with your key. The playbook also disables SSH password logins unless `ssh_hardening` is `false` (see [Security notes](#security-notes)) and configures UFW with a default-deny incoming policy, allowing only SSH (on the port configured in `hosts.yml`), HTTP (80), and HTTPS (443, TCP and UDP for HTTP/3).
 
 ### 7. Authorize your SSH key for deployments
 
@@ -342,6 +343,7 @@ curl -u <username>:<password> https://registry.example.com/v2/myimage/tags/list
 
 ## Security notes
 
+- **SSH:** `make server` writes `/etc/ssh/sshd_config.d/01-hardening.conf`, which disables password and keyboard-interactive logins and limits `root` to key-based login (`PermitRootLogin prohibit-password` - provisioning still connects as `root` with your key). The file sorts before cloud-init's `50-cloud-init.conf`, because sshd uses the first value it reads for these options, and the playbook fails if the effective settings do not match. Check them on the server with `sshd -T | grep -E '^(passwordauthentication|kbdinteractiveauthentication|permitrootlogin) '`. If you lose your SSH key, use your VPS provider's web console - password login over SSH no longer works. To keep password logins enabled, set `ssh_hardening: false` in `hosts.yml`; `make server` then removes `01-hardening.conf` again, so the setting can be switched either way at any time.
 - **Firewall:** UFW is configured by the provisioning playbook with a default-deny incoming policy. Only SSH, HTTP, and HTTPS are open. All other ports are blocked.
 - **Authentication:** Only the private registry (`registry_domain`) requires credentials. The cache registry is intentionally public and unauthenticated - anyone who can reach port 443 can pull through it. This is safe for public Docker Hub images, but see the warning below about Docker Hub credentials.
 - **TLS:** Both registries use TLS 1.2/1.3 only. HSTS with a two-year max-age is enforced. Certificates are issued and renewed automatically by Caddy.
@@ -595,6 +597,7 @@ curl -u registry:<password> http://localhost:5000/v2/_catalog
     ├── logs.yml                       # Tail container logs from both registries
     ├── gc.yml                         # Garbage collection for private and cache registries
     └── roles/
+        ├── ssh-hardening/             # Disables SSH password logins
         ├── ufw/                       # Configures UFW firewall rules
         ├── docker/                    # Installs Docker Engine
         ├── create-deploy-user/        # Creates the deploy system user
