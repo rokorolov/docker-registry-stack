@@ -5,7 +5,12 @@
     gather_facts: false
     tasks:
         -   name: Docker container status
-            ansible.builtin.command: !unsafe docker ps --format "table {{.Names}}\t{{.Status}}\t{{.Image}}"
+            ansible.builtin.shell: !unsafe |
+                if command -v docker >/dev/null 2>&1; then
+                    docker ps --format "table {{.Names}}\t{{.Status}}\t{{.Image}}"
+                else
+                    echo "Docker not installed (run: make server)"
+                fi
             changed_when: false
             register: docker_ps
 
