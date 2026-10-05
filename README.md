@@ -17,6 +17,7 @@ Self-hosted private Docker registry with a Docker Hub pull-through cache, Caddy 
 - [Getting Started](#getting-started)
 - [Using the Registries](#using-the-registries)
 - [Security Notes](#security-notes)
+- [Custom SSH Port](#custom-ssh-port)
 - [Day-2 Operations](#day-2-operations)
 - [Local Development](#local-development)
 - [Project Structure](#project-structure)
@@ -190,7 +191,7 @@ ssh-copy-id -i ~/.ssh/id_ed25519.pub -p <ssh-port> root@<server-ip>
 
 Use the public key you normally log in with (`id_ed25519.pub`, `id_ecdsa.pub`, or `id_rsa.pub`). After this step, all provisioning commands use key-based authentication - the password is no longer needed, and step 6 disables SSH password logins entirely (unless you set `ssh_hardening: false`).
 
-> **Want a non-default SSH port?** Change it now, before step 6 enables the firewall - see [Use a non-default SSH port](#use-a-non-default-ssh-port).
+> **Want a non-default SSH port?** Change it now, before step 6 enables the firewall - see [Custom SSH port](#custom-ssh-port).
 
 ### 3. Generate registry credentials
 
@@ -352,6 +353,85 @@ curl -u <username>:<password> https://registry.example.com/v2/myimage/tags/list
 - **HTTP secret:** Registry v3 logs a startup warning if no HTTP secret is set. On a single-node deployment this is harmless - the secret only matters when multiple registry instances share a load-balancer (session stickiness for uploads). To suppress the warning, add `REGISTRY_HTTP_SECRET=<random-string>` to `~/registry/.env` on the server.
 - **SSH host key checking:** The provisioning toolbox runs Ansible inside a Docker container where `~/.ssh` is mounted read-only and owned by the host user. SSH refuses config files it does not own, so `ansible.cfg` sets `host_key_checking = False` and `-F /dev/null` to skip the SSH config file entirely. This means provisioning commands do not verify the server's host key against a known-hosts file. The risk is low for a server you own and provisioned yourself, but be aware that a compromised DNS or network MITM would not be detected. Provision over a trusted network.
 
+## Custom SSH port
+
+Moving SSH off port 22 cuts down automated scanning and brute-force noise in the auth logs. It is not a substitute for key-based authentication and a firewall.
+
+Pick the path that matches your server:
+
+- [Fresh server](#fresh-server) - before `make server` has run (recommended: the firewall is not active yet)
+- [Already provisioned server](#already-provisioned-server) - UFW is active, so open the new port first
+- [At server creation with cloud-init](#at-server-creation-with-cloud-init) - set the port before you ever log in
+
+### Fresh server
+
+Change the port **before** `make server`. UFW is still inactive at that point, so a mistake cannot lock you out at the firewall, and `make server` then enables UFW with only the new port allowed - port 22 is never opened.
+
+1. Log in on the current port and **keep this session open** until step 3 succeeds:
+
+   ```bash
+   ssh -p 22 root@<server-ip>
+   ```
+
+   On the server, set the new port in a drop-in file, check it, and restart SSH:
+
+   ```bash
+   echo "Port 2222" > /etc/ssh/sshd_config.d/10-port.conf
+   sshd -t
+   sshd -T | grep '^port '
+   systemctl daemon-reload
+   if systemctl is-active --quiet ssh.socket; then
+       systemctl restart ssh.socket
+   else
+       systemctl restart ssh
+   fi
+   ```
+
+   Before restarting, check the output: `sshd -t` must print nothing, and `sshd -T | grep '^port '` must print only `port 2222` - see [Why a drop-in file](#why-a-drop-in-file) if it also shows `port 22`. Ubuntu 24.04 and later start SSH through `ssh.socket`; Debian and older Ubuntu use the `ssh` service - the `if` handles both.
+
+2. If your VPS provider has a cloud firewall (Hetzner, AWS, DigitalOcean, and others), allow the new TCP port there. This is the most common reason a new port appears unreachable.
+
+3. From a **new** terminal, confirm the new port works:
+
+   ```bash
+   ssh -p 2222 root@<server-ip>
+   ```
+
+   If it fails, fix it from the session you kept open, or from your provider's web console.
+
+4. Set `ansible_port: 2222` in `provisioning/hosts.yml`, then continue with the normal steps - `./provision make preflight` confirms Ansible connects on the new port.
+
+### Already provisioned server
+
+UFW is active, so follow the [Fresh server](#fresh-server) steps with two additions: allow the new port before restarting SSH in step 1, and remove the old rule only after step 3 succeeds.
+
+```bash
+ufw allow 2222/tcp          # before the restart in step 1
+ufw delete allow 22/tcp     # after step 3 succeeds
+```
+
+### At server creation with cloud-init
+
+Most providers accept cloud-init user data when you create a server. This sets the port before you ever log in; then continue with step 2 of [Fresh server](#fresh-server):
+
+```yaml
+#cloud-config
+write_files:
+  - path: /etc/ssh/sshd_config.d/10-port.conf
+    content: "Port 2222\n"
+runcmd:
+  - [systemctl, daemon-reload]
+  - [sh, -c, "systemctl restart ssh.socket 2>/dev/null || systemctl restart ssh"]
+```
+
+### Why a drop-in file
+
+The commands above write `/etc/ssh/sshd_config.d/10-port.conf` instead of editing `/etc/ssh/sshd_config`:
+
+- **Package upgrades stay clean.** Files in `sshd_config.d/` are never touched by upgrades, while an edited main config triggers conffile prompts on `openssh-server` upgrades.
+- **`Port` values are combined, not overridden.** Unlike most settings, sshd listens on every `Port` from every config file. If the main config still has an uncommented `Port 22` line, SSH listens on both ports. Fresh installs ship it commented out (`#Port 22`); otherwise comment it out first.
+- **Single-value settings work the other way.** For options such as `PasswordAuthentication`, the first value read wins, and `sshd_config.d/` is read before the rest of the main config - so an edit to the main config can be silently overridden by a drop-in like cloud-init's `50-cloud-init.conf`. This is why `make server` names its hardening file `01-hardening.conf` (see [Security notes](#security-notes)).
+
 ## Day-2 operations
 
 ### Check server status
@@ -371,69 +451,6 @@ cd provisioning && ./provision make logs
 
 # Show more lines
 cd provisioning && ./provision make logs LINES=500
-```
-
-### Use a non-default SSH port
-
-Moving SSH off port 22 cuts down automated scanning and brute-force noise in the auth logs. It is not a substitute for key-based authentication and a firewall.
-
-**On a fresh server, change the port before `make server`.** UFW is still inactive at that point, so a mistake cannot lock you out at the firewall, and `make server` then enables UFW with only the new port allowed - port 22 is never opened.
-
-1. Log in on the current port and **keep this session open** until step 3 succeeds:
-
-   ```bash
-   ssh -p 22 root@<server-ip>
-   ```
-
-   On the server, set the new port in a drop-in file and restart SSH:
-
-   ```bash
-   echo "Port 2222" > /etc/ssh/sshd_config.d/10-port.conf
-   sshd -t
-   sshd -T | grep '^port '
-   systemctl daemon-reload
-   if systemctl is-active --quiet ssh.socket; then
-       systemctl restart ssh.socket
-   else
-       systemctl restart ssh
-   fi
-   ```
-
-   Before restarting, check the output: `sshd -t` must print nothing, and `sshd -T | grep '^port '` must print only `port 2222`. Unlike most settings, `Port` values from all config files are combined, not overridden - if the main `/etc/ssh/sshd_config` still has an uncommented `Port 22` line, SSH would listen on both ports. Fresh installs ship it commented out (`#Port 22`); otherwise comment it out first.
-
-   Prefer the drop-in file over editing `sshd_config` directly: package upgrades never touch files in `sshd_config.d/`, while an edited main config triggers conffile prompts on `openssh-server` upgrades. For single-value settings such as `PasswordAuthentication`, the first value read wins and `sshd_config.d/` is read first - so an edit to the main config can be silently overridden by a drop-in like cloud-init's `50-cloud-init.conf`.
-
-   Ubuntu 24.04 and later start SSH through `ssh.socket`; Debian and older Ubuntu use the `ssh` service - the `if` handles both.
-
-2. If your VPS provider has a cloud firewall (Hetzner, AWS, DigitalOcean, and others), allow the new TCP port there. This is the most common reason a new port appears unreachable.
-
-3. From a **new** terminal, confirm the new port works:
-
-   ```bash
-   ssh -p 2222 root@<server-ip>
-   ```
-
-   If it fails, fix it from the session you kept open, or from your provider's web console.
-
-4. Set `ansible_port: 2222` in `provisioning/hosts.yml`, then continue with the normal steps - `./provision make preflight` confirms Ansible connects on the new port.
-
-**On a server that is already provisioned**, UFW is active. Allow the new port before restarting SSH, and remove the old rule only after step 3 succeeds:
-
-```bash
-ufw allow 2222/tcp          # before step 1's restart
-ufw delete allow 22/tcp     # after step 3 succeeds
-```
-
-**When creating a new server**, most providers accept cloud-init user data, which sets the port before you ever log in:
-
-```yaml
-#cloud-config
-write_files:
-  - path: /etc/ssh/sshd_config.d/10-port.conf
-    content: "Port 2222\n"
-runcmd:
-  - [systemctl, daemon-reload]
-  - [sh, -c, "systemctl restart ssh.socket 2>/dev/null || systemctl restart ssh"]
 ```
 
 ### Upgrade system packages
