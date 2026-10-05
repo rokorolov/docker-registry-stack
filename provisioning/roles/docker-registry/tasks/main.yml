@@ -9,5 +9,3 @@
             registry_domain, cache_registry_domain and acme_email must be set in inventory (e.g. hosts.yml all.vars)
 
 -   import_tasks: deploy_caddy_config.yml
-
--   import_tasks: remove_certbot.yml
