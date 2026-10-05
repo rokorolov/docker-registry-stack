@@ -388,6 +388,7 @@ Moving SSH off port 22 cuts down automated scanning and brute-force noise in the
    ```bash
    echo "Port 2222" > /etc/ssh/sshd_config.d/10-port.conf
    sshd -t
+   sshd -T | grep '^port '
    systemctl daemon-reload
    if systemctl is-active --quiet ssh.socket; then
        systemctl restart ssh.socket
@@ -396,7 +397,11 @@ Moving SSH off port 22 cuts down automated scanning and brute-force noise in the
    fi
    ```
 
-   Use the drop-in file rather than editing `sshd_config`: the main config includes `sshd_config.d/` first and the first `Port` wins, and package upgrades never overwrite it. `sshd -t` must print nothing. Ubuntu 24.04 and later start SSH through `ssh.socket`; Debian and older Ubuntu use the `ssh` service - the `if` handles both.
+   Before restarting, check the output: `sshd -t` must print nothing, and `sshd -T | grep '^port '` must print only `port 2222`. Unlike most settings, `Port` values from all config files are combined, not overridden - if the main `/etc/ssh/sshd_config` still has an uncommented `Port 22` line, SSH would listen on both ports. Fresh installs ship it commented out (`#Port 22`); otherwise comment it out first.
+
+   Prefer the drop-in file over editing `sshd_config` directly: package upgrades never touch files in `sshd_config.d/`, while an edited main config triggers conffile prompts on `openssh-server` upgrades. For single-value settings such as `PasswordAuthentication`, the first value read wins and `sshd_config.d/` is read first - so an edit to the main config can be silently overridden by a drop-in like cloud-init's `50-cloud-init.conf`.
+
+   Ubuntu 24.04 and later start SSH through `ssh.socket`; Debian and older Ubuntu use the `ssh` service - the `if` handles both.
 
 2. If your VPS provider has a cloud firewall (Hetzner, AWS, DigitalOcean, and others), allow the new TCP port there. This is the most common reason a new port appears unreachable.
 
