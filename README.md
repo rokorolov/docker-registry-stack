@@ -117,6 +117,8 @@ Two independent registry containers run behind a single Caddy instance. The **pr
 | Disk (registry data) | depends on image count | plan for growth |
 | Network | 1 public IP, ports 80 and 443 open | - |
 
+Provisioning targets a **fresh server**.
+
 The production stack (Caddy + two registry containers) is lightweight - under 250 MB RSS at idle. The only variable is disk space for stored images, which can range from a few MB to several GB per image. A standard 1 vCPU / 1 GB RAM VPS with 40 GB total disk is a comfortable starting point for a small team.
 
 ### Supported operating systems
@@ -137,7 +139,7 @@ The production stack (Caddy + two registry containers) is lightweight - under 25
 | SSH access to the server | Provisioning and deployment |
 | Two DNS records pointed at the server | TLS certificate issuance (one per registry) |
 
-Ansible, `apache2-utils`, and all other provisioning dependencies are bundled in the toolbox Docker image - nothing else needs to be installed locally.
+Ansible, the Galaxy collections, and all other provisioning dependencies are bundled in the toolbox Docker image - nothing else needs to be installed locally.
 
 ## Getting Started
 
@@ -233,7 +235,7 @@ cd provisioning && ./provision make upgrade
 
 ### 6. Provision the server
 
-Installs Docker Engine, creates the `deploy` system user, and renders the Caddyfile to `/etc/docker-registry/caddy/` on the server. On servers set up before the Caddy migration it also removes Certbot, its renewal cron job, and `/etc/letsencrypt`.
+Installs Docker Engine, creates the `deploy` system user, and renders the Caddyfile to `/etc/docker-registry/caddy/` on the server.
 
 ```bash
 cd provisioning && ./provision make server
@@ -475,14 +477,6 @@ cd provisioning && ./provision make server
 
 Caddy reloads the new config automatically - no restart needed.
 
-### Upgrade from the Nginx version
-
-Servers provisioned before the switch to Caddy migrate in three steps:
-
-1. In `provisioning/hosts.yml`, rename `certbot_admin_email` to `acme_email`.
-2. Run `cd provisioning && ./provision make server`. This renders the Caddyfile and removes Certbot and `/etc/letsencrypt`. The running Nginx keeps its certificates in memory until the next step.
-3. Run `make deploy HOST=<server-ip> PORT=<ssh-port> HTPASSWD_FILE=./htpasswd` right away. Docker Compose removes the Nginx container and starts Caddy, which requests new certificates on startup.
-
 ### Delete images and run garbage collection
 
 The API can delete image manifests, but the underlying layer blobs remain on disk until garbage collection is run. Deleting is a two-step process.
@@ -620,7 +614,7 @@ curl -u registry:<password> http://localhost:5000/v2/_catalog
         ├── ufw/                       # Configures UFW firewall rules
         ├── docker/                    # Installs Docker Engine
         ├── create-deploy-user/        # Creates the deploy system user
-        └── docker-registry/           # Deploys the Caddyfile, removes legacy Certbot
+        └── docker-registry/           # Deploys the Caddyfile
             └── templates/
                 └── Caddyfile.j2
 ```

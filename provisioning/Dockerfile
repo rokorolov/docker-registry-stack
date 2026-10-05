@@ -2,8 +2,7 @@ FROM python:3.12.11-alpine3.22
 
 RUN apk add --no-cache \
     make \
-    openssh-client \
-    apache2-utils
+    openssh-client
 
 RUN pip install --no-cache-dir "ansible-core>=2.21.0,<2.22.0"
 
