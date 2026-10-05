@@ -123,7 +123,7 @@ The production stack (Caddy + two registry containers) is lightweight - under 25
 
 | Layer | Supported OS |
 |---|---|
-| Remote server | Ubuntu 22.04 LTS (Jammy) / 24.04 LTS (Noble) - Debian 11 (Bullseye) / 12 (Bookworm) (any APT-based distro should work) |
+| Remote server | Ubuntu 22.04 LTS (Jammy) / 24.04 LTS (Noble) / 26.04 LTS (Resolute) - Debian 11 (Bullseye) / 12 (Bookworm) (any APT-based distro should work) |
 | Control node (provisioning + deploy) | Linux, macOS |
 | Local development (Docker only) | Linux, macOS, Windows |
 
