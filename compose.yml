@@ -1,12 +1,12 @@
 services:
-    nginx:
-        image: nginx:1.30.3-alpine3.23
+    caddy:
+        image: caddy:2.11.6-alpine
         ports:
             - "5000:5000"
             - "5001:5001"
         volumes:
-            - ./docker/development/nginx/conf.d:/etc/nginx/conf.d
-            - ./docker/development/nginx/auth/htpasswd:/etc/nginx/auth/htpasswd
+            - ./docker/development/caddy/Caddyfile:/etc/caddy/Caddyfile:ro
+            - ./docker/development/caddy/users:/etc/caddy-auth/users:ro
         depends_on:
             - registry
             - cache-registry

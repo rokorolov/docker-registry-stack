@@ -1,0 +1,20 @@
+{
+	email {{ acme_email }}
+}
+
+(hsts) {
+	header Strict-Transport-Security "max-age=63072000"
+}
+
+{{ registry_domain }} {
+	import hsts
+	basic_auth /v2/* {
+		import /etc/caddy-auth/users
+	}
+	reverse_proxy registry:5000
+}
+
+{{ cache_registry_domain }} {
+	import hsts
+	reverse_proxy cache-registry:5000
+}

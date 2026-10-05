@@ -1,6 +1,6 @@
 .DEFAULT_GOAL := help
 
-.PHONY: help build bootstrap change-ssh-port preflight status logs gc requirements server authorize certbot upgrade
+.PHONY: help build bootstrap change-ssh-port preflight status logs gc requirements server authorize upgrade
 
 help:
 	@echo "Usage: make <target>"
@@ -13,9 +13,8 @@ help:
 	@echo "  logs                           Show last 200 lines of registry logs (override: LINES=500)"
 	@echo "  gc                             Run garbage collection to free disk space from deleted images"
 	@echo "  requirements                   Install Ansible Galaxy roles and collections (local Ansible only)"
-	@echo "  server                         Provision the server (docker, deploy user, nginx config)"
+	@echo "  server                         Provision the server (docker, deploy user, Caddy config)"
 	@echo "  authorize                      Authorize SSH keys for the deploy user"
-	@echo "  certbot                        Install Certbot and issue SSL certificates"
 	@echo "  upgrade                        Upgrade and clean APT packages on the server"
 
 build:
@@ -48,9 +47,6 @@ server: requirements
 
 authorize:
 	ansible-playbook authorize.yml -i hosts.yml
-
-certbot: requirements
-	ansible-playbook certbot.yml -i hosts.yml
 
 upgrade:
 	ansible-playbook upgrade.yml -i hosts.yml
