@@ -4,36 +4,38 @@
     remote_user: root
     gather_facts: false
     vars:
+        compose: docker compose --project-directory /home/deploy/registry -p registry
         registry_container: registry-registry-1
-        cache_container: registry-cache-registry-1
         # registry:3.x ships config at /etc/distribution/config.yml (changed from v2's /etc/docker/registry/)
         config_path: /etc/distribution/config.yml
     tasks:
-        # GC is stop-the-world: a layer uploaded concurrently can be swept before
-        # its manifest is committed, corrupting the image. Pause any CI pipelines
-        # that push images before running this command.
+        # GC is stop-the-world: a blob uploaded during the sweep can be deleted
+        # before its manifest is committed, so pushes are refused while it runs.
+        # The cache registry is not collected: it expires content itself (proxy TTL).
+        -   name: Collect garbage with the registry in read-only mode
+            block:
+                -   name: Restart registry in read-only mode
+                    ansible.builtin.command: "{{ compose }} up -d --wait registry"
+                    environment:
+                        REGISTRY_READONLY: "true"
+                    changed_when: true
 
-        -   name: Garbage collect private registry
-            ansible.builtin.shell: >
-                docker exec {{ registry_container }}
-                /bin/registry garbage-collect
-                {{ config_path }} --delete-untagged 2>&1
-            register: gc_registry
-            changed_when: "'blob eligible for deletion' in gc_registry.stdout"
-            failed_when:
-                - gc_registry.rc != 0
-                - "'Path not found' not in gc_registry.stdout"
-
-        -   name: Garbage collect cache registry
-            ansible.builtin.shell: >
-                docker exec {{ cache_container }}
-                /bin/registry garbage-collect
-                {{ config_path }} --delete-untagged 2>&1
-            register: gc_cache
-            changed_when: "'blob eligible for deletion' in gc_cache.stdout"
-            failed_when:
-                - gc_cache.rc != 0
-                - "'Path not found' not in gc_cache.stdout"
+                -   name: Garbage collect private registry
+                    ansible.builtin.shell: >
+                        docker exec {{ registry_container }}
+                        /bin/registry garbage-collect
+                        {{ config_path }} --delete-untagged 2>&1
+                    register: gc_registry
+                    changed_when: "'blob eligible for deletion' in gc_registry.stdout"
+                    failed_when:
+                        - gc_registry.rc != 0
+                        - "'Path not found' not in gc_registry.stdout"
+            always:
+                -   name: Restart registry in read-write mode
+                    ansible.builtin.command: "{{ compose }} up -d --wait registry"
+                    environment:
+                        REGISTRY_READONLY: "false"
+                    changed_when: true
 
         -   name: GC results (private registry)
             ansible.builtin.debug:
@@ -41,10 +43,3 @@
                     {{ ['(registry is empty — nothing to collect)']
                        if 'Path not found' in gc_registry.stdout
                        else gc_registry.stdout_lines }}
-
-        -   name: GC results (cache registry)
-            ansible.builtin.debug:
-                msg: >-
-                    {{ ['(registry is empty — nothing to collect)']
-                       if 'Path not found' in gc_cache.stdout
-                       else gc_cache.stdout_lines }}

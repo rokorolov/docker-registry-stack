@@ -49,7 +49,12 @@
                     - docker-compose-plugin
                 state: present
                 update_cache: yes
-            notify: Ensure docker service is started and enabled
+
+        -   name: Ensure Docker is running and enabled at boot
+            ansible.builtin.service:
+                name: docker
+                state: started
+                enabled: yes
 
 -   name: Set periodic Docker prune
     become: true
