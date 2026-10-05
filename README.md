@@ -125,7 +125,7 @@ The production stack (Caddy + two registry containers) is lightweight - under 25
 
 | Layer | Supported OS |
 |---|---|
-| Remote server | Ubuntu 22.04 LTS (Jammy) / 24.04 LTS (Noble) / 26.04 LTS (Resolute) - Debian 11 (Bullseye) / 12 (Bookworm) (any APT-based distro should work) |
+| Remote server | Ubuntu 22.04 LTS (Jammy) / 24.04 LTS (Noble) / 26.04 LTS (Resolute) - Debian 12 (Bookworm) (any APT-based distro should work) |
 | Control node (provisioning + deploy) | Linux, macOS |
 | Local development (Docker only) | Linux, macOS, Windows |
 
@@ -145,7 +145,7 @@ Ansible, the Galaxy collections, and all other provisioning dependencies are bun
 
 > Run every command from the project root. Provisioning commands start with `cd provisioning &&` - return to the project root (`cd ..`) before the next step.
 >
-> Steps **2** (Install your SSH key) and **7** (Authorize deploy user) are optional - skip them if your VPS provider installed your SSH key at server creation time.
+> Step **2** (Install your SSH key) is optional - skip it if your VPS provider installed your SSH key at server creation time. Step **7** (Authorize deploy user) is always required: `make deploy` connects as the `deploy` user, which has no key until this step.
 
 ### 0. Build the provisioning toolbox
 
@@ -227,10 +227,16 @@ cd provisioning && ./provision make preflight
 
 ### 5. Upgrade the server
 
-Update all system packages before installing anything. This ensures a clean security baseline and avoids Docker being installed on top of stale package lists. If a kernel upgrade was applied, the playbook reboots the server automatically and waits for it to come back up.
+Update all system packages before installing anything. This ensures a clean security baseline and avoids Docker being installed on top of stale package lists.
 
 ```bash
 cd provisioning && ./provision make upgrade
+```
+
+If the upgrade needs a reboot (for example after a kernel update), the playbook says so. On a fresh server, reboot right away:
+
+```bash
+cd provisioning && ./provision make upgrade REBOOT=true
 ```
 
 ### 6. Provision the server
