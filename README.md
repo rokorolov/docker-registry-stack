@@ -531,7 +531,7 @@ make deploy HOST=<server-ip> PORT=<ssh-port> HTPASSWD_FILE=./htpasswd
 | Image | Tag strategy | Rationale |
 |---|---|---|
 | `caddy` | `2.11.6-alpine` | Caddy 2 stable series. |
-| `registry` | `3.1.1` | Registry v3 is the current actively-maintained series; v2 received its last update in February 2025. |
+| `registry` | `3.1.2` | Registry v3 is the current actively-maintained series; v2 received its last update in February 2025. |
 
 ### Update Ansible Galaxy collections
 
