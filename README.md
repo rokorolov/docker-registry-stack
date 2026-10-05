@@ -141,7 +141,7 @@ Ansible, `apache2-utils`, and all other provisioning dependencies are bundled in
 
 ## Getting Started
 
-> All commands in this section run from the `provisioning/` directory - `cd provisioning` once before starting.
+> Run every command from the project root. Provisioning commands start with `cd provisioning &&` - return to the project root (`cd ..`) before the next step.
 >
 > Steps **2** (Install your SSH key) and **7** (Authorize deploy user) are optional - skip them if your VPS provider installed your SSH key at server creation time.
 
@@ -195,7 +195,9 @@ Use the public key you normally log in with (`id_ed25519.pub`, `id_ecdsa.pub`, o
 
 ### 3. Generate registry credentials
 
-The production `htpasswd` file is gitignored and must be created locally before deployment. Use bcrypt (`-B`) - other `htpasswd` formats such as MD5 and SHA are cryptographically weak, trivially crackable offline, and not accepted by Caddy.
+Run from the project root, so the file sits where the step 8 example (`HTPASSWD_FILE=./htpasswd`) expects it.
+
+The production `htpasswd` file must be created locally before deployment. Use bcrypt (`-B`) - other `htpasswd` formats such as MD5 and SHA are cryptographically weak, trivially crackable offline, and not accepted by Caddy.
 
 ```bash
 # Create a new file with the first user
@@ -211,7 +213,7 @@ If `htpasswd` is not installed, use the Docker equivalent:
 docker run --rm httpd:2.4 htpasswd -nbB <username> <password> >> htpasswd
 ```
 
-Keep `htpasswd` out of version control - it is already listed in `.gitignore`.
+Keep `htpasswd` out of version control - `.gitignore` ignores any file named `htpasswd`, wherever you create it.
 
 ### 4. Run preflight checks
 
