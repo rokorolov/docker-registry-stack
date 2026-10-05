@@ -142,7 +142,7 @@ Ansible, `apache2-utils`, and all other provisioning dependencies are bundled in
 
 > All commands in this section run from the `provisioning/` directory - `cd provisioning` once before starting.
 >
-> Steps **2** (Bootstrap SSH key) and **7** (Authorize deploy user) are optional - skip them if your VPS provider installed your SSH key at server creation time.
+> Steps **2** (Install your SSH key) and **7** (Authorize deploy user) are optional - skip them if your VPS provider installed your SSH key at server creation time.
 
 ### 0. Build the provisioning toolbox
 
@@ -170,24 +170,26 @@ Edit `provisioning/hosts.yml` and fill in your values:
 | Variable | Description |
 |---|---|
 | `ansible_host` | Server IP address |
-| `ansible_port` | SSH port (default: `22`) |
+| `ansible_port` | SSH port (default: `22`). If your server uses a non-default SSH port, set it here - every provisioning command connects on this port and the firewall allows it. |
 | `registry_domain` | Domain for the private registry (e.g. `registry.example.com`) |
 | `cache_registry_domain` | Domain for the cache registry (e.g. `cache-registry.example.com`) |
 | `acme_email` | Email address for Let's Encrypt account and expiry notifications |
 
 Both domains must resolve to the server before the first deploy - Caddy requests certificates when it starts.
 
-### 2. Bootstrap root SSH key access
+### 2. Install your SSH key on the server
 
 > **Skip this step if your VPS provider already installed your SSH key at creation time** - most providers offer this during the server setup wizard. Only needed when your server was provisioned with password-only root access.
 
-Connects to the server once using the root password and installs your local public key into `/root/.ssh/authorized_keys`. After this step, all subsequent commands use key-based authentication - the password is no longer needed.
+Run on your machine, not in the toolbox. `ssh-copy-id` ships with OpenSSH, asks for the root password once, and appends your public key to `/root/.ssh/authorized_keys`:
 
 ```bash
-cd provisioning && ./provision make bootstrap
+ssh-copy-id -i ~/.ssh/id_ed25519.pub -p <ssh-port> root@<server-ip>
 ```
 
-You will be prompted for the root password interactively. The playbook detects your key type automatically, checking for `id_ed25519`, `id_ecdsa`, and `id_rsa` in that order.
+Use the public key you normally log in with (`id_ed25519.pub`, `id_ecdsa.pub`, or `id_rsa.pub`). After this step, all provisioning commands use key-based authentication - the password is no longer needed.
+
+> **Want a non-default SSH port?** Change it now, before step 6 enables the firewall - see [Use a non-default SSH port](#use-a-non-default-ssh-port).
 
 ### 3. Generate registry credentials
 
@@ -369,17 +371,68 @@ cd provisioning && ./provision make logs
 cd provisioning && ./provision make logs LINES=500
 ```
 
-### Change the SSH port
+### Use a non-default SSH port
 
-Changing the default SSH port from 22 reduces exposure to automated scanning bots and eliminates most brute-force noise in auth logs. It is not a substitute for key-based authentication and a firewall, but it is a low-cost hardening step.
+Moving SSH off port 22 cuts down automated scanning and brute-force noise in the auth logs. It is not a substitute for key-based authentication and a firewall.
+
+**On a fresh server, change the port before `make server`.** UFW is still inactive at that point, so a mistake cannot lock you out at the firewall, and `make server` then enables UFW with only the new port allowed - port 22 is never opened.
+
+1. Log in on the current port and **keep this session open** until step 3 succeeds:
+
+   ```bash
+   ssh -p 22 root@<server-ip>
+   ```
+
+   On the server, set the new port in a drop-in file and restart SSH:
+
+   ```bash
+   echo "Port 2222" > /etc/ssh/sshd_config.d/10-port.conf
+   sshd -t
+   sshd -T | grep '^port '
+   systemctl daemon-reload
+   if systemctl is-active --quiet ssh.socket; then
+       systemctl restart ssh.socket
+   else
+       systemctl restart ssh
+   fi
+   ```
+
+   Before restarting, check the output: `sshd -t` must print nothing, and `sshd -T | grep '^port '` must print only `port 2222`. Unlike most settings, `Port` values from all config files are combined, not overridden - if the main `/etc/ssh/sshd_config` still has an uncommented `Port 22` line, SSH would listen on both ports. Fresh installs ship it commented out (`#Port 22`); otherwise comment it out first.
+
+   Prefer the drop-in file over editing `sshd_config` directly: package upgrades never touch files in `sshd_config.d/`, while an edited main config triggers conffile prompts on `openssh-server` upgrades. For single-value settings such as `PasswordAuthentication`, the first value read wins and `sshd_config.d/` is read first - so an edit to the main config can be silently overridden by a drop-in like cloud-init's `50-cloud-init.conf`.
+
+   Ubuntu 24.04 and later start SSH through `ssh.socket`; Debian and older Ubuntu use the `ssh` service - the `if` handles both.
+
+2. If your VPS provider has a cloud firewall (Hetzner, AWS, DigitalOcean, and others), allow the new TCP port there. This is the most common reason a new port appears unreachable.
+
+3. From a **new** terminal, confirm the new port works:
+
+   ```bash
+   ssh -p 2222 root@<server-ip>
+   ```
+
+   If it fails, fix it from the session you kept open, or from your provider's web console.
+
+4. Set `ansible_port: 2222` in `provisioning/hosts.yml`, then continue with the normal steps - `./provision make preflight` confirms Ansible connects on the new port.
+
+**On a server that is already provisioned**, UFW is active. Allow the new port before restarting SSH, and remove the old rule only after step 3 succeeds:
 
 ```bash
-cd provisioning && ./provision make change-ssh-port PORT=2222
+ufw allow 2222/tcp          # before step 1's restart
+ufw delete allow 22/tcp     # after step 3 succeeds
 ```
 
-The playbook handles the full sequence safely: opens the new port in UFW first (if UFW is active), updates `/etc/ssh/sshd_config`, validates the new config with `sshd -t`, restarts sshd, verifies the new port is reachable from your machine, then removes the old UFW rule. If the new port is reachable, `ansible_port` in `hosts.yml` is updated automatically - all subsequent commands use the new port without any manual changes. If it is not, the playbook prints a warning (usually a cloud-level firewall at your VPS provider) and leaves `hosts.yml` for you to update.
+**When creating a new server**, most providers accept cloud-init user data, which sets the port before you ever log in:
 
-> If the connection is interrupted after sshd restarts and the playbook cannot confirm the new port is reachable, use your VPS provider's out-of-band console to verify the service is running, then re-run the command.
+```yaml
+#cloud-config
+write_files:
+  - path: /etc/ssh/sshd_config.d/10-port.conf
+    content: "Port 2222\n"
+runcmd:
+  - [systemctl, daemon-reload]
+  - [sh, -c, "systemctl restart ssh.socket 2>/dev/null || systemctl restart ssh"]
+```
 
 ### Upgrade system packages
 
@@ -535,8 +588,6 @@ curl -u registry:<password> http://localhost:5000/v2/_catalog
     ├── requirements.yml               # Ansible Galaxy roles and collections
     ├── hosts.yml.dist                 # Inventory template - copy to hosts.yml
     ├── preflight.yml                  # Pre-provisioning validation playbook
-    ├── bootstrap.yml                  # One-time root SSH key setup (password → key auth)
-    ├── change-ssh-port.yml            # Change SSH port and update hosts.yml
     ├── server.yml                     # Main provisioning playbook
     ├── authorize.yml                  # SSH key authorization playbook
     ├── upgrade.yml                    # System upgrade playbook
@@ -590,7 +641,10 @@ Object storage protects against a failed disk or server, not against deletion: a
 
 Planned implementation:
 - R2 bucket and a bucket-scoped access token created once in the Cloudflare dashboard (documented step - keeps a broad Cloudflare API token out of the inventory)
-- Private registry configured to use the S3 storage driver (`regionendpoint` plus `forcepathstyle: true`, required by registry v3 for non-AWS endpoints); the cache registry stays on local disk, since its content can always be re-fetched from Docker Hub
+- Private registry configured to use the S3 storage driver; the cache registry stays on local disk, since its content can always be re-fetched from Docker Hub
+- Provider-neutral inventory variables (`registry_s3_*`, never `r2_*`), so switching between R2, AWS S3, Backblaze B2, Hetzner, or MinIO is a configuration change plus an `rclone sync` of the bucket - no code changes
+- An explicit `registry_s3_type` variable, either `aws` or `s3-compatible`, instead of inferring the provider from an empty endpoint. `s3-compatible` adds `regionendpoint` and `forcepathstyle: true` (required by registry v3 for non-AWS endpoints); `aws` sets neither. Two values rather than one per provider, because every non-AWS service needs identical driver settings
+- Preflight and role assertions that reject invalid combinations: an unknown type, `s3-compatible` without `registry_s3_endpoint`, or `aws` with a leftover endpoint
 - Credentials stored as inventory variables and rendered by Ansible into a root-only env file loaded by the registry container - never hardcoded in compose files
 - Migration of existing images with `rclone sync` (the on-disk layout and the bucket layout are identical)
 - Nightly bucket copy to a second provider
